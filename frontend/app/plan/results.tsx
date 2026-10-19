@@ -62,7 +62,7 @@ export default function ResultsStep() {
     <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={`${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`}>
       <Card style={{ gap: spacing.sm }}>
         <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
-        <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, 80 cm walkways, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
+        <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, walkways clear, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
         <Text style={s.h}>Budget summary</Text>

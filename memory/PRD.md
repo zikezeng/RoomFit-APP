@@ -44,3 +44,17 @@ Build RoomFit — AI-powered furniture planning & shopping assistant (built as E
 - Upload no longer runs AI detection (backend endpoint kept but unused). Step 3 picks room type (Living/Bedroom supported; Kitchen/Bathroom/Closet/Balcony flagged unsupported).
 - User declined Claude integration.
 - Tested: iteration 5 pass + self-test full demo flow to results.
+
+## Update — Real-plan segmentation (deterministic)
+- Step 1: apartment size (sq ft) + home type (Studio/1B1B/2B1B/2B2B/3B2B) required before upload; clear image preview.
+- Backend `/api/floorplan/segment`: OpenCV wall segmentation (no AI) → room polygons; frontend suggests room names from size/shape + home type; scale auto-estimated from sq ft (wall measurement overrides).
+- Step 2: real image + colored overlays; tap room to set type/rename/delete; add room, fix corners, mark doors; home-type validation warnings.
+- Step 3: select room on plan (living/bedroom supported); layouts use the selected room polygon.
+- Tested: iteration 6 pass.
+- Backlog: split open-plan living/kitchen automatically, detect kitchen counters as fixtures, door auto-detection.
+
+## Iteration 7 (fork) — done
+- Step 2 manual editor: drag room corners (Edit corners mode), tap wall line to add corner, Delete corner, "Add rectangle" quick room, Dining type chip; rename/delete room.
+- Solver: polygon edge-crossing check (angled walls/notches), bed-relative items use bed's wall, studio support (bed pre-selected in living room when home type = Studio), generic layout pool for non-living/bedroom rooms, 60 cm walkway for balcony/closet/hallway/kitchen.
+- Room-specific catalogs: dining, kitchen, walk-in closet, balcony, hallway now furnishable (bathroom not).
+- CSV download + Print already in Results.

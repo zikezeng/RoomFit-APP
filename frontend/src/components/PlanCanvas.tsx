@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { GestureResponderEvent, View } from "react-native";
 import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text as SvgText } from "react-native-svg";
 
@@ -20,21 +20,37 @@ interface Props {
   draft?: Pt[];
   dimRooms?: (id: string) => boolean;
   onTap?: (p: Pt, tol: number) => void;
+  /** Return true to start dragging from this point (e.g. a corner handle). */
+  onDragStart?: (p: Pt, tol: number) => boolean;
+  onDrag?: (p: Pt) => void;
+  onDragEnd?: () => void;
   testID?: string;
 }
 
 /** The user's actual floor plan image with an editable room-segmentation overlay (image px space). */
-export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft = [], dimRooms, onTap, testID }: Props) {
+export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft = [], dimRooms, onTap, onDragStart, onDrag, onDragEnd, testID }: Props) {
   const { colors } = useTheme();
   const [w, setW] = useState(0);
+  const dragging = useRef(false);
   const W = ap.imgW || 1;
   const H = ap.imgH || 1;
   const k = w / W; // display px per image px
   const fs = W / 40;
   const sw = W / 300;
-  const tap = (e: GestureResponderEvent) => {
-    if (!onTap || !k) return;
-    onTap({ x: e.nativeEvent.locationX / k, y: e.nativeEvent.locationY / k }, 22 / k);
+  const handle = k ? Math.max(sw * 3, 9 / k) : sw * 3; // ≥ 9 display px so corners are easy to grab
+  const pt = (e: GestureResponderEvent): Pt => ({ x: Math.max(0, Math.min(W, e.nativeEvent.locationX / k)), y: Math.max(0, Math.min(H, e.nativeEvent.locationY / k)) });
+  const grant = (e: GestureResponderEvent) => {
+    dragging.current = !!k && !!onDragStart?.(pt(e), 22 / k);
+  };
+  const move = (e: GestureResponderEvent) => {
+    if (dragging.current) onDrag?.(pt(e));
+  };
+  const release = (e: GestureResponderEvent) => {
+    if (dragging.current) {
+      dragging.current = false;
+      return onDragEnd?.();
+    }
+    if (onTap && k) onTap(pt(e), 22 / k);
   };
   return (
     <View testID={testID} onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ width: "100%", aspectRatio: W / H, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceSecondary }}>
@@ -55,7 +71,7 @@ export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft 
                 {st ? fmtAreaCm2(st.area, ap.unit) : "Uncalibrated"}
               </SvgText>
               {sel
-                ? r.poly.map((p, i) => <Circle key={i} cx={p.x} cy={p.y} r={sw * (vertex?.roomId === r.id && vertex.i === i ? 5 : 3)} fill={vertex?.roomId === r.id && vertex.i === i ? colors.error : colors.brandPrimary} />)
+                ? r.poly.map((p, i) => <Circle key={i} cx={p.x} cy={p.y} r={handle * (vertex?.roomId === r.id && vertex.i === i ? 1.5 : 1)} fill={vertex?.roomId === r.id && vertex.i === i ? colors.error : colors.brandPrimary} stroke={colors.surface} strokeWidth={sw} />)
                 : null}
             </G>
           );
@@ -81,7 +97,7 @@ export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft 
           <Circle key={`dp${i}`} cx={p.x} cy={p.y} r={sw * 3} fill={colors.error} />
         ))}
       </Svg>
-      {onTap ? <View testID={`${testID ?? "plan-canvas"}-touch`} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} onStartShouldSetResponder={() => true} onResponderRelease={tap} /> : null}
+      {onTap ? <View testID={`${testID ?? "plan-canvas"}-touch`} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} onStartShouldSetResponder={() => true} onResponderTerminationRequest={() => !dragging.current} onResponderGrant={grant} onResponderMove={move} onResponderRelease={release} onResponderTerminate={() => dragging.current && ((dragging.current = false), onDragEnd?.())} /> : null}
     </View>
   );
 }

@@ -24,7 +24,29 @@ function rectInPoly(r: Rect, poly: Pt[]) {
     { x: s.x + s.w, y: s.y + s.h },
   ];
   if (!corners.every((c) => pointInPoly(c, poly))) return false;
-  return !poly.some((v) => v.x > s.x && v.x < s.x + s.w && v.y > s.y && v.y < s.y + s.h);
+  if (poly.some((v) => v.x > s.x && v.x < s.x + s.w && v.y > s.y && v.y < s.y + s.h)) return false;
+  // No wall segment (e.g. an angled wall or a thin notch) may cut through the footprint.
+  return !poly.some((a, i) => segCrossesRect(a, poly[(i + 1) % poly.length], s));
+}
+/** Liang–Barsky: does segment ab pass through the open interior of r? */
+function segCrossesRect(a: Pt, b: Pt, r: Rect) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number) => {
+    if (Math.abs(p) < 1e-9) return q > 0;
+    const t = q / p;
+    if (p < 0) {
+      if (t > t1) return false;
+      if (t > t0) t0 = t;
+    } else {
+      if (t < t0) return false;
+      if (t < t1) t1 = t;
+    }
+    return true;
+  };
+  return clip(-dx, a.x - r.x) && clip(dx, r.x + r.w - a.x) && clip(-dy, a.y - r.y) && clip(dy, r.y + r.h - a.y) && t1 - t0 > 1e-6;
 }
 function segNearRect(a: Pt, b: Pt, r: Rect, d: number) {
   for (let k = 0; k <= 8; k++) if (pointRectDist(a.x + ((b.x - a.x) * k) / 8, a.y + ((b.y - a.y) * k) / 8, r) <= d) return true;
@@ -94,8 +116,12 @@ function freeItem(g: RoomGeom, uid: string, p: Product, ws: WallSeg, along: numb
 
 // ---------------- Validation ----------------
 
+/** Main rooms keep an 80 cm walkway; compact secondary spaces (balcony, closet, hallway, kitchen) use 60 cm. */
+export const walkwayFor = (kind: RoomGeom["kind"]) => (kind === "living" || kind === "bedroom" || kind === "dining" ? CLEARANCE.walkway : 60);
+
 function walkway(g: RoomGeom, placed: Placed[]): { ok: boolean; detail: string } {
-  const R = CLEARANCE.walkway / 2;
+  const cw = walkwayFor(g.kind);
+  const R = cw / 2;
   const step = 10;
   const nx = Math.max(1, Math.floor(g.width / step));
   const ny = Math.max(1, Math.floor(g.length / step));
@@ -123,7 +149,7 @@ function walkway(g: RoomGeom, placed: Placed[]): { ok: boolean; detail: string }
   const entries = g.doors.length
     ? g.doors.map((d) => nearestFree({ x: (d.a.x + d.b.x) / 2 + d.n.x * 50, y: (d.a.y + d.b.y) / 2 + d.n.y * 50 }, 40))
     : [nearestFree({ x: g.width / 2, y: g.length / 2 }, Infinity)];
-  if (entries.some((e) => e < 0)) return { ok: false, detail: g.doors.length ? "A doorway has no 80 cm clear path into the room." : "No 80 cm clear floor area remains." };
+  if (entries.some((e) => e < 0)) return { ok: false, detail: g.doors.length ? `A doorway has no ${cw} cm clear path into the room.` : `No ${cw} cm clear floor area remains.` };
   const seen = new Uint8Array(nx * ny);
   const q = [entries[0]];
   seen[entries[0]] = 1;
@@ -142,15 +168,15 @@ function walkway(g: RoomGeom, placed: Placed[]): { ok: boolean; detail: string }
       }
     }
   }
-  if (entries.some((e) => !seen[e])) return { ok: false, detail: "The doors are not connected by an 80 cm walkway." };
+  if (entries.some((e) => !seen[e])) return { ok: false, detail: `The doors are not connected by a ${cw} cm walkway.` };
   const unreached = placed
     .filter((o) => !NO_REACH.has(o.p.category))
     .filter((o) => {
       for (let n = 0; n < nx * ny; n++) if (seen[n] && pointRectDist(cell(n).x, cell(n).y, o.rect) <= R + CLEARANCE.reach) return false;
       return true;
     });
-  if (unreached.length) return { ok: false, detail: `No 80 cm walkway reaches the ${unreached.map((o) => label(o.p)).join(", ")}.` };
-  return { ok: true, detail: g.doors.length ? "An 80 cm walkway connects every door to every main piece." : "An 80 cm walkway reaches every main piece." };
+  if (unreached.length) return { ok: false, detail: `No ${cw} cm walkway reaches the ${unreached.map((o) => label(o.p)).join(", ")}.` };
+  return { ok: true, detail: g.doors.length ? `A ${cw} cm walkway connects every door to every main piece.` : `A ${cw} cm walkway reaches every main piece.` };
 }
 
 export function validateLayout(g: RoomGeom, items: PlacedItem[], budget: number) {
@@ -208,7 +234,7 @@ interface Strategy {
   pref: "compact" | "style" | "value";
 }
 
-const POOLS: Record<"living" | "bedroom", Strategy[]> = {
+const POOLS: Record<"living" | "bedroom" | "other", Strategy[]> = {
   living: [
     { name: "Open & Airy", tagline: "Compact pieces keep a wide, open walkway.", rank: 0, armSide: 1, shift: 0, pref: "compact" },
     { name: "Cozy & Balanced", tagline: "A conversation group gathered around the coffee table.", rank: 1, armSide: 1, shift: 0, pref: "style" },
@@ -224,6 +250,14 @@ const POOLS: Record<"living" | "bedroom", Strategy[]> = {
     { name: "Restful & Open", tagline: "Bed shifted to widen the wardrobe zone.", rank: 0, armSide: -1, shift: 40, pref: "compact" },
     { name: "Cozy Retreat", tagline: "Alternative bed wall for morning light.", rank: 1, armSide: -1, shift: -40, pref: "style" },
     { name: "Work & Rest", tagline: "Desk-friendly arrangement on a secondary wall.", rank: 3, armSide: 1, shift: 30, pref: "value" },
+  ],
+  other: [
+    { name: "Open & Airy", tagline: "Compact pieces along the walls keep the floor open.", rank: 0, armSide: 1, shift: 0, pref: "compact" },
+    { name: "Balanced", tagline: "Style-first picks spread across the main walls.", rank: 1, armSide: 1, shift: 0, pref: "style" },
+    { name: "Storage First", tagline: "Best-value pieces that maximise storage.", rank: 2, armSide: -1, shift: 0, pref: "value" },
+    { name: "Open & Airy", tagline: "Pieces start from a different wall for a clearer path.", rank: 1, armSide: -1, shift: 40, pref: "compact" },
+    { name: "Balanced", tagline: "Alternative arrangement on a secondary wall.", rank: 2, armSide: -1, shift: -40, pref: "style" },
+    { name: "Storage First", tagline: "Storage moved to the longest free wall.", rank: 3, armSide: 1, shift: 30, pref: "value" },
   ],
 };
 
@@ -302,8 +336,17 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
   const sideFacing = (side: number): Facing => (isH() ? (side > 0 ? "left" : "right") : side > 0 ? "up" : "down");
 
   const placeOne = (u: (typeof units)[number], p: Product): PlacedItem | null => {
-    const anchor = get("sofa") ?? get("bed_frame");
+    const main = get("sofa") ?? get("bed_frame");
+    const anchor = main;
     const ct = get("coffee_table");
+    // Bed-relative pieces use the bed's own wall (in a studio the bed may not sit on the main wall).
+    const bedRel = (perp: (bed: Placed) => number) => {
+      const bed = get("bed_frame");
+      if (!bed) return null;
+      const bw = bed.item.wall !== null ? g.walls[bed.item.wall] : S;
+      const along = bw.axis === "h" ? bed.rect.x + bed.rect.w / 2 : bed.rect.y + bed.rect.h / 2;
+      return freeItem(g, u.uid, p, bw, along, perp(bed), wallFacing(bw), placed);
+    };
     const anyWall = (probe: Product = p) => {
       for (const w of storage) {
         const r = scanWall(g, u.uid, p, w, w.s0 + p.width / 2 + 10, placed, probe);
@@ -345,10 +388,14 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
       case "side_table":
       case "nightstand":
       case "floor_lamp": {
+        const anchor = u.cat === "nightstand" ? (get("bed_frame") ?? main) : main;
         if (anchor) {
+          const aw = anchor.item.wall !== null ? g.walls[anchor.item.wall] : S;
+          const aAlong = aw.axis === "h" ? anchor.rect.x + anchor.rect.w / 2 : anchor.rect.y + anchor.rect.h / 2;
+          const aSpan = aw.axis === "h" ? anchor.rect.w : anchor.rect.h;
           const sides = u.cat === "floor_lamp" ? [st.armSide, -st.armSide] : u.idx === 0 ? [-st.armSide, st.armSide] : [st.armSide, -st.armSide];
           for (const s of sides) {
-            const r = scanWall(g, u.uid, p, S, alongOf(anchor.rect) + s * (spanOf(anchor.rect) / 2 + p.width / 2), placed);
+            const r = scanWall(g, u.uid, p, aw, aAlong + s * (aSpan / 2 + p.width / 2), placed);
             if (r && rectGap(footprint(r, p, g), anchor.rect) < 60) return r;
           }
         }
@@ -389,22 +436,22 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
         return anyWall();
       }
       case "bench": {
-        const bed = get("bed_frame");
-        if (bed) {
-          const r = freeItem(g, u.uid, p, S, alongOf(bed.rect), bed.p.depth + p.depth / 2 + 5, wallFacing(S), placed);
-          if (r) return r;
-        }
-        return anyWall();
+        const r = bedRel((bed) => bed.p.depth + p.depth / 2 + 5);
+        return r ?? anyWall();
       }
       case "mattress": {
         const bed = get("bed_frame");
         if (!bed || p.width > bed.p.width || p.depth > bed.p.depth) return null;
-        return freeItem(g, u.uid, p, S, alongOf(bed.rect), bed.p.depth - p.depth / 2 - 2, wallFacing(S), placed);
+        return bedRel(() => bed.p.depth - p.depth / 2 - 2);
       }
       case "rug": {
-        const bed = get("bed_frame");
         if (ct) return freeItem(g, u.uid, p, S, alongOf(ct.rect), perpOf(ct.rect), wallFacing(S), placed);
-        if (bed) return freeItem(g, u.uid, p, S, alongOf(bed.rect), bed.p.depth * 0.65, wallFacing(S), placed);
+        if (get("bed_frame")) return bedRel((bed) => bed.p.depth * 0.65);
+        const table = get("dining_table");
+        if (table) {
+          const c = { x: table.rect.x + table.rect.w / 2, y: table.rect.y + table.rect.h / 2 };
+          return freeItem(g, u.uid, p, S, isH() ? c.x : c.y, isH() ? (c.y - S.c) * S.n : (c.x - S.c) * S.n, wallFacing(S), placed);
+        }
         return freeItem(g, u.uid, p, S, mid(), (isH() ? g.length : g.width) / 2, wallFacing(S), placed);
       }
       default:
@@ -425,8 +472,8 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
       }
     }
     if (it) {
+      if ((u.cat === "sofa" || u.cat === "bed_frame") && it.wall !== null && !(u.cat === "bed_frame" && get("sofa"))) S = g.walls[it.wall];
       placed.push({ item: it, p: u.cands[u.pick], rect: footprint(it, u.cands[u.pick], g) });
-      if ((u.cat === "sofa" || u.cat === "bed_frame") && it.wall !== null) S = g.walls[it.wall];
     }
     else {
       const name = u.cat === "custom" ? u.cands[0].name : CATEGORY_MAP[u.cat].label.toLowerCase();
@@ -444,7 +491,8 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
 }
 
 export function generateLayouts(input: GenInput): Layout[] {
-  const pool = POOLS[input.geom.kind === "bedroom" ? "bedroom" : "living"];
+  const k = input.geom.kind;
+  const pool = POOLS[k === "bedroom" ? "bedroom" : k === "living" ? "living" : "other"];
   const start = (input.seed * 3) % pool.length;
   const variant = Math.floor(input.seed / 2);
   return [0, 1, 2].map((i) => {

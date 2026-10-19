@@ -94,8 +94,12 @@ export interface Apartment {
   detection: "none" | "pending" | "ai" | "manual" | "failed" | "sample";
   detectionNote: string | null;
   calib: { a: Pt; b: Pt; cm: number } | null;
+  autoScale: number | null; // cm per px estimated from the apartment size
+  sizeSqft: number | null;
+  homeType: HomeType | null;
   unit: Unit;
 }
+export type HomeType = "studio" | "1b1b" | "2b1b" | "2b2b" | "3b2b";
 
 export interface PlacedItem {
   uid: string;

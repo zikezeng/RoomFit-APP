@@ -1,5 +1,5 @@
 // Apartment (image-space) model → per-room scaled geometry (cm). Works for any uploaded plan.
-import { Apartment, PlanRoom, Pt, Rect, RoomKind, RoomSpec, Unit, WallOpening } from "./types";
+import { Apartment, HomeType, PlanRoom, Pt, Rect, RoomKind, RoomSpec, Unit, WallOpening } from "./types";
 
 export const uid = () => Math.random().toString(36).slice(2, 9);
 export const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -53,7 +53,69 @@ export function distToSeg(p: Pt, a: Pt, b: Pt) {
 export const distToPolyEdges = (p: Pt, poly: Pt[]) => Math.min(...poly.map((a, i) => distToSeg(p, a, poly[(i + 1) % poly.length])));
 
 /** cm per image pixel, or null when uncalibrated. */
-export const scaleOf = (ap: Apartment) => (ap.calib && dist(ap.calib.a, ap.calib.b) > 0 ? ap.calib.cm / dist(ap.calib.a, ap.calib.b) : null);
+export const scaleOf = (ap: Apartment) => (ap.calib && dist(ap.calib.a, ap.calib.b) > 0 ? ap.calib.cm / dist(ap.calib.a, ap.calib.b) : ap.autoScale);
+export const SQFT_CM2 = 929.0304;
+
+export const HOME_TYPES: { id: HomeType; label: string; bed: number; bath: number }[] = [
+  { id: "studio", label: "Studio", bed: 0, bath: 1 },
+  { id: "1b1b", label: "1B1B", bed: 1, bath: 1 },
+  { id: "2b1b", label: "2B1B", bed: 2, bath: 1 },
+  { id: "2b2b", label: "2B2B", bed: 2, bath: 2 },
+  { id: "3b2b", label: "3B2B", bed: 3, bath: 2 },
+];
+
+/** cm/px so that the segmented rooms add up to the apartment size the user entered. */
+export const estimateScale = (rooms: PlanRoom[], sqft: number) => {
+  const px = rooms.reduce((s, r) => s + polyArea(r.poly), 0);
+  return px > 0 ? Math.sqrt((sqft * SQFT_CM2) / px) : null;
+};
+
+/** Propose room names from size/shape + home type. Always shown as suggestions for the user to confirm. */
+export function guessKinds(polys: Pt[][], home: HomeType): PlanRoom[] {
+  const ht = HOME_TYPES.find((h) => h.id === home)!;
+  const info = polys.map((poly, i) => {
+    const b = bbox(poly);
+    const w = b.x1 - b.x0;
+    const h = b.y1 - b.y0;
+    return { i, poly, area: polyArea(poly), aspect: Math.max(w, h) / Math.max(1, Math.min(w, h)) };
+  });
+  const order = [...info].sort((a, b) => b.area - a.area);
+  const kinds: RoomKind[] = new Array(polys.length).fill("other");
+  const balcony = order.slice(1).find((r) => r.aspect >= 2.3);
+  if (balcony) kinds[balcony.i] = "balcony";
+  const queue: RoomKind[] = ["living", ...Array(ht.bed).fill("bedroom"), ...Array(ht.bath).fill("bathroom"), "closet"];
+  order.forEach((r) => {
+    if (kinds[r.i] !== "other") return;
+    const k = queue.shift();
+    if (k) kinds[r.i] = k;
+  });
+  const count: Partial<Record<RoomKind, number>> = {};
+  return info.map((r) => {
+    const k = kinds[r.i];
+    count[k] = (count[k] ?? 0) + 1;
+    const total = kinds.filter((x) => x === k).length;
+    return { id: uid(), kind: k, label: `${KIND_LABEL[k]}${total > 1 ? ` ${count[k]}` : ""}`, poly: r.poly };
+  });
+}
+
+/** Home-type sanity checks shown in Step 2. */
+export function homeTypeWarnings(ap: Apartment): string[] {
+  const ht = HOME_TYPES.find((h) => h.id === ap.homeType);
+  if (!ht) return [];
+  const n = (k: RoomKind) => ap.rooms.filter((r) => r.kind === k).length;
+  const out: string[] = [];
+  if (ht.bed === 0 && n("bedroom") > 0) out.push("You chose Studio, but a separate Bedroom is marked. Studios usually have one main room — check the labels.");
+  if (ht.bed > 0 && n("bedroom") < ht.bed) out.push(`${ht.label} should have ${ht.bed} bedroom(s); ${n("bedroom")} marked.`);
+  if (n("bathroom") < ht.bath) out.push(`${ht.label} should have ${ht.bath} bathroom(s); ${n("bathroom")} marked.`);
+  if (!n("living")) out.push("No Living Room marked yet.");
+  if (ht.id === "studio" && ap.rooms.length >= 5) out.push(`${ap.rooms.length} areas were found for a Studio — check whether the split is accurate.`);
+  const s = scaleOf(ap);
+  if (ap.calib && s && ap.sizeSqft) {
+    const sq = (ap.rooms.reduce((a, r) => a + polyArea(r.poly), 0) * s * s) / SQFT_CM2;
+    if (Math.abs(sq - ap.sizeSqft) / ap.sizeSqft > 0.3) out.push(`Rooms add up to ${Math.round(sq)} sq ft but you entered ${ap.sizeSqft} sq ft — check the wall measurement.`);
+  }
+  return out;
+}
 
 export function roomStats(ap: Apartment, room: PlanRoom) {
   const s = scaleOf(ap);
@@ -96,6 +158,9 @@ export const sampleApartment = (): Apartment => ({
   detection: "sample",
   detectionNote: "Structured sample geometry (not recognised from an image).",
   calib: { a: { x: 380, y: 170 }, b: { x: 380, y: 530 }, cm: 360 }, // Mia confirms a 3.6 m wall
+  autoScale: null,
+  sizeSqft: 650,
+  homeType: "1b1b",
   unit: "m",
 });
 

@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { RoomGeom, sampleApartment, specToGeom } from "@/src/lib/apartment";
+import { buildGeom, RoomGeom, sampleApartment } from "@/src/lib/apartment";
 import { CATEGORIES, setCustomProducts } from "@/src/lib/catalog";
 import { generateLayouts, trySwap } from "@/src/lib/solver";
-import { Apartment, CategoryId, Layout, MoodId, Need, PlacedItem, Product, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
+import { Apartment, CategoryId, HomeType, Layout, MoodId, Need, PlacedItem, Product, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
 import { storage } from "@/src/utils/storage";
 
 export interface PlanState {
@@ -38,11 +38,24 @@ export const emptyApartment = (): Apartment => ({
   detection: "none",
   detectionNote: null,
   calib: null,
-  unit: "m",
+  autoScale: null,
+  sizeSqft: null,
+  homeType: null,
+  unit: "ft",
 });
 
-export const defaultNeeds = (kind: RoomKind) =>
-  Object.fromEntries(CATEGORIES.filter((c) => c.rooms[kind]).map((c) => [c.id, { qty: c.preselect?.[kind] ?? 0, priority: c.rooms[kind]! }])) as Partial<Record<CategoryId, Need>>;
+export const defaultNeeds = (kind: RoomKind, home?: HomeType | null) => {
+  const needs = Object.fromEntries(CATEGORIES.filter((c) => c.rooms[kind]).map((c) => [c.id, { qty: c.preselect?.[kind] ?? 0, priority: c.rooms[kind]! }])) as Partial<Record<CategoryId, Need>>;
+  // A studio's main room is also the bedroom: sleep essentials are pre-selected there.
+  if (home === "studio" && kind === "living") {
+    needs.bed_frame = { qty: 1, priority: "essential" };
+    needs.mattress = { qty: 1, priority: "essential" };
+    needs.nightstand = { qty: 1, priority: "optional" };
+    needs.tv_stand = { qty: 0, priority: "optional" };
+    needs.dining_table = { qty: 0, priority: "optional" };
+  }
+  return needs;
+};
 
 export const emptyRoom = (): RoomSpec => ({ width: 0, length: 0, door: { wall: "bottom", at: 0.16, width: 90 }, windows: [{ wall: "top", at: 0.5, width: 140 }] });
 export const SAMPLE_ROOM: RoomSpec = { width: 480, length: 360, door: { wall: "bottom", at: 0.16, width: 90 }, windows: [{ wall: "top", at: 0.5, width: 160 }, { wall: "right", at: 0.5, width: 120 }] };
@@ -78,7 +91,7 @@ export const demoState = (): PlanState => {
 };
 
 type Invalidate = "all" | "layouts" | "none";
-const KEY = "roomfit_state_v3";
+const KEY = "roomfit_state_v4";
 const IMG_KEY = "roomfit_image_v2";
 
 interface Ctx {
@@ -87,7 +100,7 @@ interface Ctx {
   geom: RoomGeom | null;
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
-  selectKind: (kind: RoomKind) => void;
+  selectRoom: (id: string) => void;
   generate: (seed: number) => void;
   selectLayout: (id: string) => void;
   swap: (uid: string, productId: string) => ReturnType<typeof trySwap> | null;
@@ -130,7 +143,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state, ready]);
 
-  const geom = useMemo(() => (state.dimsConfirmed && state.roomKind ? specToGeom(state.room, state.apartment.unit, state.roomKind) : null), [state.room, state.dimsConfirmed, state.roomKind, state.apartment.unit]);
+  const geom = useMemo(() => buildGeom(state.apartment, state.selectedRoomId), [state.apartment, state.selectedRoomId]);
   const geomRef = useRef(geom);
   geomRef.current = geom;
 
@@ -155,11 +168,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const selectKind = useCallback((kind: RoomKind) => {
+  const selectRoom = useCallback((id: string) => {
     setState((s) => {
-      if (s.roomKind === kind) return s;
-      const sameKind = s.needsKind === kind;
-      return { ...s, roomKind: kind, needsKind: kind, needs: sameKind ? s.needs : defaultNeeds(kind), layouts: null, selectedLayoutId: null, plan: null };
+      const room = s.apartment.rooms.find((r) => r.id === id);
+      if (!room || s.selectedRoomId === id) return s;
+      const sameKind = s.needsKind === room.kind;
+      return { ...s, selectedRoomId: id, roomKind: room.kind, needsKind: room.kind, needs: sameKind ? s.needs : defaultNeeds(room.kind, s.apartment.homeType), layouts: null, selectedLayoutId: null, plan: null };
     });
   }, []);
 
@@ -191,8 +205,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const loadDemo = useCallback(() => setState(demoState()), []);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartment, selectKind, generate, selectLayout, swap, reset, loadDemo }),
-    [state, ready, geom, update, setApartment, selectKind, generate, selectLayout, swap, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartment, selectRoom, generate, selectLayout, swap, reset, loadDemo }),
+    [state, ready, geom, update, setApartment, selectRoom, generate, selectLayout, swap, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

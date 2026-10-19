@@ -1,0 +1,45 @@
+{
+  "summary": "RoomFit iteration 6 - full both-stack review of the new OpenCV-segmentation + home-type/sq-ft workflow at https://roomfit-1.preview.emergentagent.com (viewport 390x844). Backend: POST /api/floorplan/segment returns method='opencv-wall-segmentation' with 5 rooms for /app/tests/sample_floorplan.png (polygons 3-9 pts, every coord within 0-1000) - matches the review spec exactly. 400 on garbage image, 422 on empty body. Prior status/health endpoints still green. Frontend Step 1: tapping upload-floorplan-zone before entering apartment-size-input / home-type raises upload-error ('Enter the apartment size (150-10,000 sq ft) and home type first.'); after filling 650 + home-type-1b1b and choosing the sample png the busy indicator appears, then floorplan-preview + upload-plan-image render the real image and detection-note reads 'Found 5 enclosed areas by detecting the walls in your image. Room names are suggestions based on size and your 1B1B home type - please confirm them.' Step 2: editor-canvas shows the uploaded raster + colour overlays and 5 room-rows with the expected labels (Living Room 321 sq ft, Bedroom 157, Balcony 92, Bathroom 64, Walk-in Closet 17). calibration-status reads 'Estimated from your 650 sq ft 1B1B' before any wall is measured. Selecting room-row-0 opens room-editor-card; room-kind-kitchen reassigns the kind, room-label-input renames to 'My Kitchen', and because the Living Room was reassigned a home-type-warning ('No Living Room marked yet.') appears correctly. Wall calibration: wall-chip-0 + known-wall-input=3 + apply-scale-button -> calibration-status flips to 'Measured wall: 3.0 ft'. mode-draw + 4 taps on editor-canvas-touch + finish-room-button adds a 6th room-row (ok). mode-door + 2 taps register silently (no error). confirm-dimensions-button navigates to Step 3. Step 3: rooms-canvas renders the real polygons; select-room-kitchen-* -> room-unsupported-notice visible and rooms-continue-button aria-disabled=true; select-room-living / bedroom enables continue with CTA 'Furnish Living Room' / 'Furnish Bedroom'. Full living flow: furniture-continue -> style-card-japandi (after 600 ms settle) -> budget-continue -> layouts-summary with 3 valid layout-plan-* drawn inside the irregular living polygon (door openings clear, within budget, physically fits). select-layout-0 switches CTA to 'Shop this layout'. Studio test: re-upload with home-type-studio + 500 sq ft -> home-type-warning '5 areas were found for a Studio - check whether the split is accurate.' Demo path: try-demo-button sets demo-notice, upload-continue immediately enabled, Step 2 shows 6 structured rooms from the sample apartment. Persistence: reload on /plan/rooms keeps the url + state (storage key roomfit_state_v4 verified). Deprecated packages detected: none. React Native issues detected: props.pointerEvents deprecation warning (carried over from iters 2-5, non-blocking).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' still fires on the Furniture/Style screens (carried from iters 2-5). Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_6.json",
+    "/app/backend/tests/test_segment.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/test_reports/pytest/segment_results.xml"
+  ],
+  "action_items": [
+    "LOW: Replace deprecated 'props.pointerEvents' usages with 'style.pointerEvents' in RN components to silence the console warning on Style/Budget screens."
+  ],
+  "critical_code_review_comments": [
+    "backend/segment.py:30-35 - Four morph-close kernels (5/7/9/11% of max side) are tried and the one yielding the most rooms wins. On the sample this returns the expected 5 polygons; good deterministic behaviour, no AI dependency.",
+    "backend/server.py:149-155 - /api/floorplan/segment correctly wraps segment_rooms, raising 400 for unreadable images. Pydantic DetectRequest ensures 422 on missing body. Clean.",
+    "frontend/app/plan/upload.tsx:36-65 - pick() now calls segmentFloorPlan() (OpenCV) only and no longer touches the Gemini AI job endpoint, matching 'The AI (Gemini) endpoint is no longer used by the app.' Note from the main agent.",
+    "frontend/app/plan/upload.tsx:49,60 - Each new upload resets apartment via emptyApartment() and recomputes autoScale from estimateScale(rooms, sqft). This correctly clears any previous demo state and seeds a usable scale even before manual calibration (verified: 'Estimated from your 650 sq ft 1B1B').",
+    "frontend/src/lib/apartment.ts:68-71 - estimateScale uses sqrt(sqft*929.03 / sum(polyArea)); yields plausible per-room sqft on the sample (Living 321 + Bedroom 157 + Balcony 92 + Bathroom 64 + WIC 17 ~= 651 sq ft, matches the entered 650).",
+    "frontend/src/lib/apartment.ts:102-118 - homeTypeWarnings correctly fires (a) Studio with >=5 areas, (b) missing Living Room when the user reassigns it, (c) <required bedroom/bathroom counts. Verified on-screen.",
+    "frontend/app/plan/dimensions.tsx:48-77 - onTap honours mode: draw appends points, door collects 2 points then pushes an opening, corners edits poly vertices; select picks walls when near an edge else the containing room. Clean separation.",
+    "frontend/app/plan/rooms.tsx:22-25 - FURNISHABLE gate + room ranking (living/bedroom first) matches the review spec.",
+    "frontend/src/state/plan-store.tsx (not re-read this iter) - Storage key bumped to roomfit_state_v4 per main-agent note; reload persistence confirmed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_segment.py (new)",
+    "/app/test_reports/iteration_6.json"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3 new segment tests + 6/6 existing tests pass)",
+    "frontend": "All review items PASS: segment returns 5 rooms within 0-1000, Step 1 upload-floorplan-zone disabled-feedback + upload-error pre-info, floorplan-preview+detection-note after upload, Step 2 editor-canvas shows real image + 5 labelled rooms + 'Estimated from your 650 sq ft 1B1B', room-kind change + rename + home-type-warning, wall-chip-0+3ft calibration flips status to 'Measured wall: 3.0 ft', mode-draw adds room, mode-door accepts 2 taps, confirm navigates to Step 3, Step 3 kitchen=unsupported-notice+continue-disabled, living/bedroom enable CTA, furniture->japandi->budget->3 valid layouts drawn inside irregular living polygon, Studio warning on re-upload, demo path end-to-end, reload persistence."
+  },
+  "seed_data_creation": "None (uses /app/tests/sample_floorplan.png and in-memory plan-store).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Workflow is now: Step 1 (upload.tsx) collects apartment size + home type FIRST, then image; OpenCV segment runs client-side via POST /api/floorplan/segment and returns normalized 0-1000 polygons (method 'opencv-wall-segmentation'). Step 2 (dimensions.tsx) is a polygon editor over the uploaded raster with mode chips (select/draw/corners/door). Step 3 (rooms.tsx) uses the real polygons; only living/bedroom are furnishable. Key testIDs added since iter 5: upload-floorplan-zone, upload-busy, floorplan-preview, upload-plan-image, floorplan-file-name, detection-note, apartment-size-input, home-type-{studio|1b1b|2b1b|2b2b|3b2b}, apartment-info-card, editor-canvas, editor-canvas-touch (responder overlay - use mouse.click at bounding box coords, not element click, after scroll_into_view_if_needed and reading box fresh), mode-{select|draw|corners|door}, finish-room-button, undo-point-button, cancel-draft-button, editor-error, home-type-warning (one per issue), room-editor-card, room-kind-{living|bedroom|kitchen|bathroom|closet|balcony|dining|hallway|other}, room-label-input, room-dims-text, delete-room-button, calibration-card, calibration-status, wall-chip-<i>, known-wall-input, apply-scale-button, unit-{m|ft}-chip, room-row-<i>, confirm-dimensions-button, rooms-canvas, select-room-<kind>-<id>, room-unsupported-notice, rooms-continue-button, try-demo-button, demo-notice. Playwright gotchas: use expect_file_chooser + chooser.set_files for the Pressable upload drop-zone (no <input type=file> on screen); for the canvas-touch overlay use page.mouse.click(box.x+dx, box.y+dy) after awaiting a fresh bounding_box; the Style screen needs ~500-600 ms after wait_for_selector before clicking a style-card to avoid flaky misses (unchanged). Storage key is roomfit_state_v4; clear localStorage then reload before starting a fresh scenario.",
+  "rca_of_issue": "No functional regressions. All review requirements verified end-to-end against the live preview URL. Only the long-standing non-blocking RN deprecation warning (props.pointerEvents) remains."
+}

@@ -143,6 +143,18 @@ async def detect_floorplan(req: DetectRequest):
         "fixtures": [{**seg(o), "label": str(o.get("label") or "Fixture")[:40]} for o in data.get("fixtures", []) if isinstance(o, dict) and all(o.get(k) is not None for k in ("x1", "y1", "x2", "y2"))],
     }
 
+from segment import segment_rooms
+
+
+@api_router.post("/floorplan/segment")
+async def segment_floorplan(req: DetectRequest):
+    """Deterministic wall-based room segmentation (OpenCV). No AI involved."""
+    try:
+        return segment_rooms(req.image_base64)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 # Recognition can exceed the ingress timeout, so it runs as a background job that the app polls.
 import asyncio
 DETECT_JOBS: dict = {}

@@ -19,9 +19,10 @@ interface Props {
   cta?: { label: string; onPress: () => void; disabled?: boolean; testID: string; icon?: React.ComponentProps<typeof Feather>["name"] };
   secondary?: { label: string; onPress: () => void; testID: string };
   header?: React.ReactNode; // sticky content under the title
+  scrollEnabled?: boolean;
 }
 
-export function WizardScaffold({ step, title, subtitle, children, cta, secondary, header }: Props) {
+export function WizardScaffold({ step, title, subtitle, children, cta, secondary, header, scrollEnabled = true }: Props) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const s = useStyles();
@@ -47,7 +48,7 @@ export function WizardScaffold({ step, title, subtitle, children, cta, secondary
         </View>
         {header}
       </View>
-      <ScrollView contentContainerStyle={[s.content, { paddingBottom: (cta ? 120 : spacing.xl) + insets.bottom }]} keyboardShouldPersistTaps="handled">
+      <ScrollView scrollEnabled={scrollEnabled} contentContainerStyle={[s.content, { paddingBottom: (cta ? 120 : spacing.xl) + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Animated.View entering={FadeInDown.duration(400)}>
           <Text style={s.title} testID="wizard-title">
             {title}

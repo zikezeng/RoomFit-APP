@@ -31,6 +31,17 @@ export async function detectFloorPlan(base64: string): Promise<DetectionResult> 
   throw new Error("Recognition timed out");
 }
 
+/** Deterministic wall-based room segmentation (OpenCV on the backend, no AI). Polygons are 0-1000 normalised. */
+export async function segmentFloorPlan(base64: string): Promise<{ method: string; rooms: { polygon: number[][]; area: number }[] }> {
+  const res = await fetch(`${API}/api/floorplan/segment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_base64: base64 }),
+  });
+  if (!res.ok) throw new Error(`Segmentation failed (${res.status})`);
+  return res.json();
+}
+
 export const STYLE_ENGINE = {
   isAI: false,
   label: "Metadata tag ranking",

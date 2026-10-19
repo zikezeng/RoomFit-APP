@@ -16,8 +16,8 @@ export default function FurnitureStep() {
   const { state, update } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
-  const kind = state.roomKind ?? "living";
-  const room = state.roomKind ? { label: KIND_LABEL[state.roomKind] } : null;
+  const room = state.apartment.rooms.find((r) => r.id === state.selectedRoomId);
+  const kind = room?.kind ?? "living";
   const cats = categoriesFor(kind);
   const needs = state.needs;
   const [form, setForm] = useState({ name: "", w: "", d: "", price: "" });

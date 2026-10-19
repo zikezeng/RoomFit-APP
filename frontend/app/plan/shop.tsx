@@ -43,7 +43,7 @@ export default function ShopStep() {
             <View style={s.status}>
               <Feather name={v.valid ? "check-circle" : "alert-circle"} size={14} color={v.valid ? colors.success : colors.error} />
               <Text style={s.caption} testID="shop-validity">
-                {v.valid ? "Layout valid · fits, no overlaps, door & 80 cm walkways clear, within budget" : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}
+                {v.valid ? "Layout valid · fits, no overlaps, door & walkways clear, within budget" : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}
               </Text>
             </View>
           </Card>
