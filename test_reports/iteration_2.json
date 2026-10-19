@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 retest of RoomFit Expo web preview (390x844) at https://roomfit-1.preview.emergentagent.com. All reported fixes from iteration 1 are VERIFIED. Fix 1: FloorPlan now uses absolute Pressable overlays (plan-item-<uid>) on both shop-floorplan-svg and results-floorplan-svg — tapping plan-item-rug-0 / sofa-0 / armchair-0 / coffee_table-0 / tv_stand-0 / side_table-0 / floor_lamp-0 opens product-sheet. No react-native-svg Console Error overlay appears after swaps, and shop-continue-button cleanly navigates to /plan/results. Fix 2: furniture-card-sofa single tap now toggles selection (1x Sofa → removed → tap again → restored). priority-toggle-sofa switches Essential/Optional only (does NOT alter qty). furniture-toggle-sofa (check button) still toggles qty. qty-armchair-plus pushes to 2x Armchair. Results page: summary-total=$1,333 and summary-remaining=$1,167 match shop budget-bar after a -$80 swap. 7 list-item-* render for the full plan. download-csv-button triggers a real roomfit-shopping-list.csv download AND renders results-message 'Shopping list downloaded as CSV.' edit-budget-button navigates to budget with $2500 preserved. change-layout-button navigates back to /plan/layouts. start-over-button clears state and returns to home (try-demo-button visible). Page refresh on shop preserves state (shop-floorplan-svg stays visible after reload). Changing room dimensions via room-width-input/room-length-input/apply-manual-dims-button invalidates the plan: shop-no-plan and results-no-plan both appear, and /plan/layouts regenerates 3 fresh layout-card-*. Not-fits swap (swap-btn-sofa-01 Kumo 3-Seat Sofa marked with Overlap) produces swap-result-message error \"...can't replace this piece: Overlap... Choose one of the options marked 'Fits'.\" and the shop budget-bar total stays unchanged ($1,692 → $1,692). Deprecated packages detected: none. React Native issues detected: console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' still fires once on load (not blocking). Minor duplicate-testID observation: when navigating shop → results via router.push, Expo Router keeps both screens mounted so plan-item-* and budget-input appear twice in the DOM (locator.first works around this but testIDs should be unique).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "shop / product-sheet", "issues": ["Product sheet is a tall bottom sheet on 390x844; swap-btn-* require scrolling inside the sheet (element.scrollIntoView used in tests). Consider making the swap list the primary scrollable area or sticky at top so swap action is reachable without scrolling."]}
+    ],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' still fires on initial load (RN 0.76+ API). Audit components (likely LinearGradient/Image on home screen) and move pointerEvents into style. Non-blocking."},
+      {"component": "Expo Router stack / duplicate testIDs", "issue": "shop and results screens remain mounted simultaneously because expo-router uses a Stack. The FloorPlan on both pages renders Pressable overlays with the same testIDs (plan-item-rug-0, plan-item-sofa-0 ...), and budget-input appears twice when navigating back from edit-budget. Not a functional bug (locator.first works and only the top screen receives taps) but testIDs should be unique for robust testing. Options: (a) prefix testIDs with the page (e.g. shop-plan-item-<uid> / results-plan-item-<uid>) or (b) use <Stack.Screen options={{ animation:'none', detachInactiveScreens:true }}> so inactive screens unmount. Reference: /app/frontend/src/components/FloorPlan.tsx:161, /app/frontend/app/plan/budget.tsx budget-input."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "LOW: Replace deprecated 'props.pointerEvents' usages with 'style.pointerEvents' to clear the remaining console warning.",
+    "LOW: Make plan-item-<uid> testIDs unique per screen (e.g. shop-plan-item-sofa-0 vs results-plan-item-sofa-0), or configure the stack to detach inactive screens, so DOM queries return a single element.",
+    "LOW (UX): Product sheet — surface swap-btn-* without requiring scroll (sticky action row or reorder swap list above descriptive sections)."
+  ],
+  "critical_code_review_comments": [
+    "FloorPlan.tsx:159-166 — the absolute Pressable overlay approach is correct and avoids the earlier react-native-svg <G onPress> issue. No further changes needed here.",
+    "furniture.tsx:33-50 — split Pressable into card (toggle qty), priority-toggle (switch priority only), and check button (toggle qty) is working on web; hitSlop=6 on priority-toggle keeps it tappable at 44+ minimum.",
+    "plan-store.tsx:107-117 — update(..., 'all') correctly nulls layouts, selectedLayoutId, and plan on dimension/needs changes, which drives shop-no-plan / results-no-plan.",
+    "ProductSheet.tsx:35 — not-fit swap error correctly surfaces reasons; keeps budget unchanged. Confirmed in test."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100% of retest items passed; 2 minor cosmetic items remain."},
+  "seed_data_creation": "None (frontend-only, local storage).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "App at https://roomfit-1.preview.emergentagent.com viewport 390x844. Dimensions step uses testIDs room-width-input / room-length-input (NOT manual-width-input). apply-manual-dims-button triggers dimensions-success and invalidates plan via update(..., 'all') so navigating to /plan/shop then shows shop-no-plan (and /plan/results shows results-no-plan). The furniture row has three distinct interactive testIDs on each card: furniture-card-<id> (qty toggle via main area), priority-toggle-<id> (Essential↔Optional switch, qty unaffected), and furniture-toggle-<id> (plus/check button toggles qty). FloorPlan hit targets are absolute Pressables with testID plan-item-<uid> (e.g. plan-item-sofa-0). After navigating shop → results, plan-item-* and budget-input testIDs are present twice in the DOM due to expo-router stack behavior; use page.locator(sel).first.",
+  "rca_of_issue": "Not applicable — all previously reported bugs are resolved. The two remaining items are cosmetic: (1) 'props.pointerEvents' deprecation on load (likely from LinearGradient on home) and (2) duplicate testIDs when the expo-router Stack keeps the previous screen mounted. Neither blocks user flows."
+}

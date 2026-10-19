@@ -1,0 +1,219 @@
+{
+  "app_name": "RoomFit",
+  "personality": "1 iOS-Native Clean with 3 Editorial Mobile typography",
+  "personality_one_liner": "A premium, sophisticated furniture planning experience that feels like browsing a high-end interior design magazine.",
+  "color": {
+    "surface": "#F9F8F4",
+    "onSurface": "#1C1B1A",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1B1A",
+    "surfaceTertiary": "#EAE6DF",
+    "onSurfaceTertiary": "#3D3B38",
+    "surfaceInverse": "#2A2928",
+    "onSurfaceInverse": "#F9F8F4",
+    "brand": "#A3B19B",
+    "brandPrimary": "#8F9D87",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#C1CBB8",
+    "onBrandSecondary": "#1C1B1A",
+    "brandTertiary": "#E5E8E1",
+    "onBrandTertiary": "#2E362A",
+    "success": "#7A9C78",
+    "onSuccess": "#FFFFFF",
+    "warning": "#C79A5E",
+    "onWarning": "#FFFFFF",
+    "error": "#B85C50",
+    "onError": "#FFFFFF",
+    "info": "#7B8B9E",
+    "onInfo": "#FFFFFF",
+    "border": "#E1DDD4",
+    "borderStrong": "#B8B1A4",
+    "divider": "#EAE6DF",
+    "muted": "#7A756D"
+  },
+  "typography": {
+    "displayFontFamily": "Fraunces",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Maintain sophisticated, generous spacing for a premium feel. Do not cramp content. Follow iOS-native vertical rhythm.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "stack_only",
+  "icon_set": "Feather",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use frosted glass on sticky bottom CTA containers",
+      "Use glass overlay behind the bottom-sheet handles/headers",
+      "Apply subtle blur to product image backgrounds in the detail view"
+    ],
+    "dont's": [
+      "Do not apply glass to body text regions",
+      "Do not use glass on form inputs or dense data cards"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "Introduce the app's value proposition and start the wizard.",
+      "states": {
+        "loading": "Centered spinner",
+        "empty": "N/A",
+        "error": "Failed to load hero image, Retry button"
+      },
+      "layout": "Large hero image covering the top half with a gradient scrim. Display the headline 'Design a Home That Actually Fits.' in Fraunces. A sticky bottom container with a primary 'Start Planning' CTA button."
+    },
+    {
+      "name": "Wizard_UploadFloorPlan",
+      "purpose": "Capture the user's room floor plan.",
+      "states": {
+        "loading": "Processing image...",
+        "empty": "A large dashed border upload zone with a camera/upload icon.",
+        "error": "Upload failed. Try again."
+      },
+      "layout": "Top segmented progress indicator. Large card area for uploading/taking a photo of the floor plan. Bottom sticky CTA 'Next'."
+    },
+    {
+      "name": "Wizard_ConfirmDimensions",
+      "purpose": "Allow user to verify or input room dimensions.",
+      "states": {
+        "loading": "Analyzing dimensions...",
+        "empty": "Show input fields for Width and Length.",
+        "error": "Invalid dimensions."
+      },
+      "layout": "Display a simplified 2D SVG preview of the room. Form inputs with labels above them for dimensions. Bottom sticky CTA."
+    },
+    {
+      "name": "Wizard_SelectFurniture",
+      "purpose": "Select which furniture items are needed.",
+      "states": {
+        "loading": "Loading furniture catalog...",
+        "empty": "No items selected.",
+        "error": "Error loading catalog."
+      },
+      "layout": "Grid of rounded cards (surfaceSecondary) with icons and '+ / -' quantity steppers for items like Sofa, TV Stand, Rug, Coffee Table."
+    },
+    {
+      "name": "Wizard_ChooseStyle",
+      "purpose": "Select the aesthetic style of the room.",
+      "states": {
+        "loading": "Loading inspiration...",
+        "empty": "N/A",
+        "error": "Error loading styles."
+      },
+      "layout": "Masonry grid or large vertical list of image cards representing styles (Japandi, Scandi, Mid-Century, Industrial). Each card must have a gradient scrim and the style name in white text overlaid at the bottom. The selected style gets a borderStrong highlight."
+    },
+    {
+      "name": "Wizard_SetBudget",
+      "purpose": "Define the overall budget for the room.",
+      "states": {
+        "loading": "N/A",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Large typographic display of the total budget amount. A slider component below. A breakdown list showing how the budget will be allocated across categories."
+    },
+    {
+      "name": "GenerateLayouts",
+      "purpose": "Show AI-generated floor plans based on previous inputs.",
+      "states": {
+        "loading": "Generating your perfect layouts... (Animated subtle loading state)",
+        "empty": "N/A",
+        "error": "Generation failed. Retry."
+      },
+      "layout": "Horizontal scroll (carousel) of 2-3 interactive scaled 2D SVG floor plans. Below the carousel, a description of why this layout works. 'Choose This Layout' CTA."
+    },
+    {
+      "name": "ShopYourRoom",
+      "purpose": "Interactive shopping experience mapped to the layout.",
+      "states": {
+        "loading": "Loading products...",
+        "empty": "No products matched.",
+        "error": "Failed to fetch products."
+      },
+      "layout": "Top half: The selected 2D SVG layout. Tapping an item highlights it. Bottom half: A bottom sheet or list showing the specific product detail (Image, Title, Price, 'Swap Alternative' button). Real-time budget progress bar at the very top."
+    },
+    {
+      "name": "FinalDashboard",
+      "purpose": "Overview of the finalized room and shopping list.",
+      "states": {
+        "loading": "Saving project...",
+        "empty": "No items in shopping list.",
+        "error": "Failed to load dashboard."
+      },
+      "layout": "A scrollable dashboard. Section 1: Final Floor Plan thumbnail. Section 2: Budget Summary chart/metrics. Section 3: Vertical list of all selected products. Bottom sticky CTA to 'Export CSV' or 'Share'."
+    }
+  ],
+  "images": {
+    "hero_home": {
+      "url": "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1Mjh8MHwxfHNlYXJjaHwxfHxCZWF1dGlmdWwlMjBhZXN0aGV0aWMlMjBpbnRlcmlvciUyMGRlc2lnbiUyMGxpdmluZyUyMHJvb20lMjBoZXJvfGVufDB8fHx8MTc5MjM3ODEzNnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Beautiful minimal living room hero image"
+    },
+    "style_japandi": {
+      "url": "https://images.unsplash.com/photo-1772797583328-f83bc3f94f80?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MTN8MHwxfHNlYXJjaHwxfHxKYXBhbmRpJTIwaW50ZXJpb3IlMjBkZXNpZ24lMjBtaW5pbWFsaXN0JTIwcm9vbXxlbnwwfHx8fDE3OTIzNzgxMzF8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Japandi interior design minimalist room"
+    },
+    "style_mid_century": {
+      "url": "https://images.unsplash.com/photo-1724582586495-d050726cf354?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxNaWQtQ2VudHVyeSUyME1vZGVybiUyMGludGVyaW9yJTIwcm9vbXxlbnwwfHx8fDE3OTIzNzgxMzF8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Mid-Century Modern interior room"
+    },
+    "style_industrial": {
+      "url": "https://images.unsplash.com/photo-1505873242700-f289a29e1e0f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwxfHxJbmR1c3RyaWFsJTIwc3R5bGUlMjBpbnRlcmlvciUyMGxpdmluZyUyMHJvb20lMjBsb2Z0fGVufDB8fHx8MTc5MjM3ODEzMXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Industrial style interior living room loft"
+    },
+    "style_scandinavian": {
+      "url": "https://images.unsplash.com/photo-1693382464372-fad822e7b38c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwxfHxTY2FuZGluYXZpYW4lMjBzdHlsZSUyMGludGVyaW9yJTIwcm9vbSUyMHdoaXRlJTIwYW5kJTIwd29vZHxlbnwwfHx8fDE3OTIzNzgxMzZ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Scandinavian style interior room white and wood"
+    }
+  },
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "style_card_select": "impactMedium",
+    "quantity_stepper": "selection",
+    "budget_slider_drag": "selection",
+    "layout_swipe": "impactLight",
+    "bottom_sheet_open": "impactLight"
+  },
+  "instructions_to_main_agent": [
+    "Implement a clean, native-feeling stack navigation wizard. Avoid multiple tabs; keep it linear.",
+    "For the 'Choose Style' screen, ensure every image card has a dark vertical gradient scrim overlay (bottom 30-40%) to guarantee text readability.",
+    "All primary CTAs (like 'Next' or 'Start Planning') must be anchored to the bottom using a glassmorphic sticky container to avoid scrolling to find them.",
+    "Use the 'Fraunces' font for main page headers to evoke an editorial, Pinterest-like premium feel, and 'DM Sans' for all UI labels and body text.",
+    "SVG 2D Layouts: The generated SVG must be scalable and cleanly designed. When rendering the 'Shop Your Room' feature, use @gorhom/bottom-sheet to display interactive product alternatives without leaving the context of the floor plan.",
+    "The progress indicator must sit gracefully at the top of the wizard screens, utilizing a segmented bar design using 'brandPrimary' for completed steps.",
+    "Respect the 'surface' (Warm Ivory) as the main screen background and 'surfaceSecondary' (White) for floating cards to create subtle, premium depth."
+  ]
+}
