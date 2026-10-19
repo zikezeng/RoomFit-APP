@@ -6,13 +6,13 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { FloorPlan } from "@/src/components/FloorPlan";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { PRODUCT_MAP } from "@/src/lib/catalog";
+import { getProduct } from "@/src/lib/catalog";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function LayoutsStep() {
   const router = useRouter();
-  const { state, generate, selectLayout } = usePlan();
+  const { state, geom, generate, selectLayout } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
@@ -25,7 +25,7 @@ export default function LayoutsStep() {
     }, 450);
   };
   useEffect(() => {
-    if (!state.layouts) run(state.seed);
+    if (!state.layouts && geom) run(state.seed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.layouts]);
 
@@ -34,13 +34,15 @@ export default function LayoutsStep() {
 
   return (
     <WizardScaffold
-      step={6}
+      step={7}
       title="Your Personalized Room Designs"
-      subtitle="Each layout is computed by a deterministic constraint solver using your confirmed room, door, windows, furniture and budget."
+      subtitle={`Computed by a deterministic constraint solver inside the real outline of ${geom?.label ?? "your room"} — walls, doors, windows, fixed fixtures, furniture and budget.`}
       cta={{ label: "Shop this layout", icon: "shopping-bag", disabled: !state.selectedLayoutId, onPress: () => router.push("/plan/shop"), testID: "layouts-continue-button" }}
       secondary={{ label: "Regenerate", onPress: () => run(state.seed + 1), testID: "regenerate-layouts-button" }}
     >
-      {busy || !state.layouts ? (
+      {!geom ? (
+        <Notice tone="warning" text="Select a calibrated room first." testID="layouts-no-room" />
+      ) : busy || !state.layouts ? (
         <Card style={s.loading} testID="layouts-loading">
           <ActivityIndicator color={colors.brandPrimary} />
           <Text style={s.p}>Placing furniture and checking constraints…</Text>
@@ -69,7 +71,7 @@ export default function LayoutsStep() {
                 </View>
                 {l.valid ? (
                   <>
-                    <FloorPlan room={state.room} items={l.items} testID={`layout-plan-${idx}`} />
+                    {geom ? <FloorPlan geom={geom} items={l.items} testID={`layout-plan-${idx}`} /> : null}
                     <View style={s.checks}>
                       {l.checks.map((c) => (
                         <View key={c.id} style={s.check}>
@@ -78,7 +80,7 @@ export default function LayoutsStep() {
                         </View>
                       ))}
                     </View>
-                    <Text style={s.caption}>{l.items.map((i) => PRODUCT_MAP[i.productId].name).join(" · ")}</Text>
+                    <Text style={s.caption}>{l.items.map((i) => getProduct(i.productId).name).join(" · ")}</Text>
                     <Text style={s.caption}>Remaining budget: {money(state.budget - l.total)}</Text>
                     <Button kind={sel ? "primary" : "secondary"} small icon={sel ? "check" : undefined} label={sel ? "Selected" : "Choose this layout"} onPress={() => selectLayout(l.id)} testID={`select-layout-${idx}`} />
                   </>

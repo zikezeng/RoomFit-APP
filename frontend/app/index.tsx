@@ -7,26 +7,19 @@ import { ScrollView, Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, Card } from "@/src/components/ui";
+import { Button } from "@/src/components/ui";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const HERO = "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200";
-
-const BENEFITS = [
-  { icon: "maximize" as const, title: "Fits Your Space", text: "Every piece is checked against your real room dimensions, door and walkways." },
-  { icon: "feather" as const, title: "Matches Your Style", text: "Japandi, Scandinavian, Mid-Century or Industrial — ranked to your taste." },
-  { icon: "dollar-sign" as const, title: "Stays Within Budget", text: "Live totals and remaining budget update with every swap." },
-];
-const HOW = ["Upload or pick a sample floor plan", "Confirm your room dimensions", "Choose furniture, style & budget", "Get validated 2D layouts and a shopping list"];
 
 export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const s = useStyles();
   const { colors } = useTheme();
-  const { state, loadDemo, reset } = usePlan();
-  const inProgress = !!state.floorPlan.source;
+  const { state, reset } = usePlan();
+  const inProgress = !!state.apartment.source;
 
   return (
     <View style={s.root}>
@@ -61,46 +54,12 @@ export default function Home() {
                 router.push("/plan/upload");
               }}
             />
-            <Button
-              kind="secondary"
-              label="Try a Demo"
-              icon="play-circle"
-              testID="try-demo-button"
-              onPress={() => {
-                loadDemo();
-                router.push("/plan/upload");
-              }}
-            />
             {inProgress ? (
               <Button kind="ghost" small label="Start a fresh project" icon="refresh-cw" testID="home-reset-button" onPress={() => (reset(), router.push("/plan/upload"))} />
             ) : null}
           </Animated.View>
 
-          <Text style={s.h2}>Why RoomFit</Text>
-          {BENEFITS.map((b, i) => (
-            <Animated.View key={b.title} entering={FadeInDown.delay(250 + i * 80).duration(450)}>
-              <Card style={s.benefit} testID={`benefit-${i}`}>
-                <View style={s.benefitIcon}>
-                  <Feather name={b.icon} size={20} color={colors.onBrandTertiary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.benefitTitle}>{b.title}</Text>
-                  <Text style={s.benefitText}>{b.text}</Text>
-                </View>
-              </Card>
-            </Animated.View>
-          ))}
-
-          <Text style={s.h2}>How It Works</Text>
-          <Card>
-            {HOW.map((h, i) => (
-              <View key={h} style={[s.howRow, i > 0 && s.howDivider]}>
-                <Text style={s.howNum}>{i + 1}</Text>
-                <Text style={s.benefitText}>{h}</Text>
-              </View>
-            ))}
-          </Card>
-          <Text style={s.foot}>Prototype: layouts are computed by a deterministic constraint solver. AI floor-plan recognition and CLIP style matching are not yet connected.</Text>
+          <Text style={s.foot}>Room outlines are suggested by a vision AI model and always confirmed by you. Layouts are computed by a deterministic constraint solver.</Text>
         </View>
       </ScrollView>
     </View>

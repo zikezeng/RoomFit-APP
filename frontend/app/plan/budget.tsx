@@ -34,13 +34,14 @@ export default function BudgetStep() {
     setBudget(v);
   };
   const prefs = { styles: state.styles, moods: state.moods };
-  const sel = CATEGORIES.filter((c) => state.needs[c.id].qty > 0);
-  const alloc = perUnitAllocation(state.needs, state.allocations, state.budget);
-  const estimate = sel.reduce((sum, c) => sum + typicalCost(c.id, prefs) * state.needs[c.id].qty, 0);
+  const sel = CATEGORIES.filter((c) => (state.needs[c.id]?.qty ?? 0) > 0);
+  const customTotal = state.customItems.reduce((a, p) => a + p.price, 0);
+  const alloc = perUnitAllocation(state.needs, state.allocations, Math.max(0, state.budget - customTotal));
+  const estimate = customTotal + sel.reduce((sum, c) => sum + typicalCost(c.id, prefs) * state.needs[c.id]!.qty, 0);
   const remaining = state.budget - estimate;
 
   return (
-    <WizardScaffold step={5} title="Let's Plan Your Budget" subtitle="Set your total furniture budget in USD. Allocations guide which price bands we pick per category." cta={{ label: "Generate layouts", icon: "grid", disabled: !!err, onPress: () => router.push("/plan/layouts"), testID: "budget-continue-button" }}>
+    <WizardScaffold step={6} title="Let's Plan Your Budget" subtitle="Set your total furniture budget in USD. Allocations guide which price bands we pick per category." cta={{ label: "Generate layouts", icon: "grid", disabled: !!err, onPress: () => router.push("/plan/layouts"), testID: "budget-continue-button" }}>
       <Card style={{ gap: spacing.md }}>
         <Text style={s.k}>Total budget</Text>
         <View style={s.amountRow}>
@@ -86,13 +87,13 @@ export default function BudgetStep() {
         <Card key={c.id} style={s.row} testID={`alloc-row-${c.id}`}>
           <View style={{ flex: 1 }}>
             <Text style={s.name}>
-              {state.needs[c.id].qty}× {c.label}
+              {state.needs[c.id]!.qty}× {c.label}
             </Text>
             <Text style={s.k}>
-              Allocated {money(alloc[c.id] * state.needs[c.id].qty)} · typical {money(typicalCost(c.id, prefs) * state.needs[c.id].qty)}
+              Allocated {money(alloc[c.id] * state.needs[c.id]!.qty)} · typical {money(typicalCost(c.id, prefs) * state.needs[c.id]!.qty)}
             </Text>
           </View>
-          <Stepper value={state.allocations[c.id]} min={1} max={60} onChange={(v) => update({ allocations: { ...state.allocations, [c.id]: v } }, "layouts")} testID={`alloc-${c.id}`} />
+          <Stepper value={state.allocations[c.id] ?? c.defaultPct} min={1} max={60} onChange={(v) => update({ allocations: { ...state.allocations, [c.id]: v } }, "layouts")} testID={`alloc-${c.id}`} />
         </Card>
       ))}
       <Text style={s.k}>Weights are relative; allocations always add up to your total budget.</Text>

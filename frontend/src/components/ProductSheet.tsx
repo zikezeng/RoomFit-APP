@@ -5,28 +5,29 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Notice, money } from "@/src/components/ui";
-import { CATEGORY_MAP, PRODUCT_MAP, STYLE_LABEL } from "@/src/lib/catalog";
+import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: () => void }) {
-  const { state, swap } = usePlan();
+  const { state, geom, swap } = usePlan();
   const insets = useSafeAreaInsets();
   const s = useStyles();
   const { colors } = useTheme();
   const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const item = state.plan?.find((i) => i.uid === uid);
-  const p = item ? PRODUCT_MAP[item.productId] : null;
+  const p = item ? getProduct(item.productId) : null;
   const alts = useMemo(
-    () => (item && state.plan ? alternativesFor(state.room, state.plan, item.uid, state.budget, { styles: state.styles, moods: state.moods }) : []),
-    [item, state.plan, state.room, state.budget, state.styles, state.moods],
+    () => (item && state.plan && geom ? alternativesFor(geom, state.plan, item.uid, state.budget, { styles: state.styles, moods: state.moods }) : []),
+    [item, state.plan, geom, state.budget, state.styles, state.moods],
   );
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;
-    const np = PRODUCT_MAP[pid];
+    const np = getProduct(pid);
     const r = swap(item.uid, pid);
+    if (!r) return;
     if (r.valid) {
       const d = np.price - p.price;
       setMsg({ tone: "success", text: `Swapped to ${np.name}. Layout re-checked: all constraints pass. Total ${d <= 0 ? "decreased" : "increased"} by ${money(Math.abs(d))}.` });

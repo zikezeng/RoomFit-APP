@@ -8,7 +8,7 @@ import { radius, useTheme } from "@/src/theme";
 /** Illustrated top-down product thumbnail (demo catalog has no verified product photos). */
 export function ProductSwatch({ category, style, size = 64, testID }: { category: CategoryId; style?: StyleId; size?: number; testID?: string }) {
   const { colors: c } = useTheme();
-  const tone = { japandi: c.wood, scandinavian: c.surfaceTertiary, midcentury: c.woodDark, industrial: c.onSurfaceTertiary }[style ?? "japandi"];
+  const tone = { japandi: c.wood, scandinavian: c.surfaceTertiary, minimalist: c.surfaceTertiary, modern: c.borderStrong, midcentury: c.woodDark, traditional: c.woodDark, farmhouse: c.wood, bohemian: c.warning, industrial: c.onSurfaceTertiary }[style ?? "japandi"];
   const accent = c.brandSecondary;
   const stroke = c.onSurfaceTertiary;
   const shape = () => {

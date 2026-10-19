@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/src/components/ui";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-export const STEPS = ["Upload", "Dimensions", "Furniture", "Style", "Budget", "Layouts", "Shop", "Plan"];
+export const STEPS = ["Upload", "Dimensions", "Room", "Furniture", "Style", "Budget", "Layouts", "Shop", "Plan"];
 
 interface Props {
   step: number; // 1-based

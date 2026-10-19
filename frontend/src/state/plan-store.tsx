@@ -1,82 +1,96 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { CATEGORIES } from "@/src/lib/catalog";
-import { SAMPLE_ROOM, calibrate } from "@/src/lib/geometry";
+import { RoomGeom, sampleApartment, specToGeom } from "@/src/lib/apartment";
+import { CATEGORIES, setCustomProducts } from "@/src/lib/catalog";
 import { generateLayouts, trySwap } from "@/src/lib/solver";
-import { CategoryId, Layout, MoodId, Need, PlacedItem, Room, StyleId } from "@/src/lib/types";
+import { Apartment, CategoryId, Layout, MoodId, Need, PlacedItem, Product, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
 import { storage } from "@/src/utils/storage";
 
-export interface FloorPlanFile {
-  source: "sample" | "upload" | null;
-  uri: string | null;
-  name: string | null;
-  kind: "image" | "pdf" | null;
-}
-
 export interface PlanState {
-  floorPlan: FloorPlanFile;
-  room: Room;
+  apartment: Apartment; // uploaded floor plan (reference image)
+  room: RoomSpec; // confirmed room dimensions (Step 2)
   dimsConfirmed: boolean;
-  needs: Record<CategoryId, Need>;
+  roomKind: RoomKind | null; // Step 3 choice
+  selectedRoomId: string | null;
+  needsKind: RoomKind | null; // room kind the needs were built for
+  needs: Partial<Record<CategoryId, Need>>;
+  customItems: Product[];
   styles: StyleId[];
   moods: MoodId[];
   inspirations: string[];
   budget: number;
-  allocations: Record<CategoryId, number>;
+  allocations: Partial<Record<CategoryId, number>>;
   layouts: Layout[] | null;
   seed: number;
   selectedLayoutId: string | null;
   plan: PlacedItem[] | null;
 }
 
-const defaultNeeds = () =>
-  Object.fromEntries(CATEGORIES.map((c) => [c.id, { qty: c.defaultPriority === "essential" ? 1 : 0, priority: c.defaultPriority }])) as Record<CategoryId, Need>;
+export const emptyApartment = (): Apartment => ({
+  source: null,
+  fileName: null,
+  imageUri: null,
+  imgW: 0,
+  imgH: 0,
+  rooms: [],
+  openings: [],
+  fixtures: [],
+  detection: "none",
+  detectionNote: null,
+  calib: null,
+  unit: "m",
+});
+
+export const defaultNeeds = (kind: RoomKind) =>
+  Object.fromEntries(CATEGORIES.filter((c) => c.rooms[kind]).map((c) => [c.id, { qty: c.preselect?.[kind] ?? 0, priority: c.rooms[kind]! }])) as Partial<Record<CategoryId, Need>>;
+
+export const emptyRoom = (): RoomSpec => ({ width: 0, length: 0, door: { wall: "bottom", at: 0.16, width: 90 }, windows: [{ wall: "top", at: 0.5, width: 140 }] });
+export const SAMPLE_ROOM: RoomSpec = { width: 480, length: 360, door: { wall: "bottom", at: 0.16, width: 90 }, windows: [{ wall: "top", at: 0.5, width: 160 }, { wall: "right", at: 0.5, width: 120 }] };
 
 export const initialState = (): PlanState => ({
-  floorPlan: { source: null, uri: null, name: null, kind: null },
-  room: SAMPLE_ROOM,
+  apartment: emptyApartment(),
+  room: emptyRoom(),
   dimsConfirmed: false,
-  needs: defaultNeeds(),
+  roomKind: null,
+  selectedRoomId: null,
+  needsKind: null,
+  needs: {},
+  customItems: [],
   styles: [],
   moods: [],
   inspirations: [],
   budget: 2500,
-  allocations: Object.fromEntries(CATEGORIES.map((c) => [c.id, c.defaultPct])) as Record<CategoryId, number>,
+  allocations: Object.fromEntries(CATEGORIES.map((c) => [c.id, c.defaultPct])),
   layouts: null,
   seed: 0,
   selectedLayoutId: null,
   plan: null,
 });
 
-/** Mia's demo scenario: sample plan, 3.6 m wall confirmed, Japandi + warm, $2,500. */
+/** Mia's demo — only loaded when the user explicitly taps "Try a Demo". */
 export const demoState = (): PlanState => {
-  const s = initialState();
-  const needs = defaultNeeds();
-  needs.armchair.qty = 1;
-  needs.side_table.qty = 1;
-  needs.floor_lamp.qty = 1;
-  needs.rug.qty = 1;
-  return {
-    ...s,
-    floorPlan: { source: "sample", uri: null, name: "Mia's apartment — living room (sample)", kind: null },
-    room: calibrate(SAMPLE_ROOM, "left", 360),
-    dimsConfirmed: true,
-    needs,
-    styles: ["japandi"],
-    moods: ["warm"],
-  };
+  const needs = defaultNeeds("living");
+  needs.armchair = { qty: 1, priority: "essential" };
+  needs.side_table = { qty: 1, priority: "optional" };
+  needs.floor_lamp = { qty: 1, priority: "essential" };
+  needs.rug = { qty: 1, priority: "optional" };
+  return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
 };
 
 type Invalidate = "all" | "layouts" | "none";
-const KEY = "roomfit_state_v1";
+const KEY = "roomfit_state_v3";
+const IMG_KEY = "roomfit_image_v2";
 
 interface Ctx {
   state: PlanState;
   ready: boolean;
+  geom: RoomGeom | null;
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
+  setApartment: (fn: (a: Apartment) => Apartment) => void;
+  selectKind: (kind: RoomKind) => void;
   generate: (seed: number) => void;
   selectLayout: (id: string) => void;
-  swap: (uid: string, productId: string) => ReturnType<typeof trySwap>;
+  swap: (uid: string, productId: string) => ReturnType<typeof trySwap> | null;
   reset: () => void;
   loadDemo: () => void;
 }
@@ -88,21 +102,37 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
+  setCustomProducts(state.customItems);
 
   useEffect(() => {
-    storage.getItem(KEY, null as string | null).then((raw) => {
+    Promise.all([storage.getItem(KEY, null as string | null), storage.getItem(IMG_KEY, null as string | null)]).then(([raw, img]) => {
       if (raw) {
         try {
-          setState({ ...initialState(), ...(JSON.parse(raw) as PlanState) });
+          const s = { ...initialState(), ...(JSON.parse(raw) as PlanState) };
+          s.apartment = { ...s.apartment, imageUri: img };
+          setState(s);
         } catch {}
       }
       setReady(true);
     });
   }, []);
 
+  // Persist state; the (large) image is stored under its own key only when it changes.
+  const lastImg = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (ready) storage.setItem(KEY, JSON.stringify(state));
+    if (!ready) return;
+    const { imageUri, ...rest } = state.apartment;
+    storage.setItem(KEY, JSON.stringify({ ...state, apartment: { ...rest, imageUri: null } }));
+    if (lastImg.current !== imageUri) {
+      lastImg.current = imageUri;
+      if (imageUri) storage.setItem(IMG_KEY, imageUri);
+      else storage.removeItem(IMG_KEY);
+    }
   }, [state, ready]);
+
+  const geom = useMemo(() => (state.dimsConfirmed && state.roomKind ? specToGeom(state.room, state.apartment.unit, state.roomKind) : null), [state.room, state.dimsConfirmed, state.roomKind, state.apartment.unit]);
+  const geomRef = useRef(geom);
+  geomRef.current = geom;
 
   const update = useCallback((patch: Partial<PlanState>, invalidate: Invalidate = "none") => {
     setState((s) => {
@@ -116,9 +146,28 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  /** Any change to the apartment geometry invalidates layouts and the furnished plan. */
+  const setApartment = useCallback((fn: (a: Apartment) => Apartment) => {
+    setState((s) => {
+      const apartment = fn(s.apartment);
+      const keepRoom = apartment.rooms.some((r) => r.id === s.selectedRoomId);
+      return { ...s, apartment, selectedRoomId: keepRoom ? s.selectedRoomId : null, layouts: null, selectedLayoutId: null, plan: null };
+    });
+  }, []);
+
+  const selectKind = useCallback((kind: RoomKind) => {
+    setState((s) => {
+      if (s.roomKind === kind) return s;
+      const sameKind = s.needsKind === kind;
+      return { ...s, roomKind: kind, needsKind: kind, needs: sameKind ? s.needs : defaultNeeds(kind), layouts: null, selectedLayoutId: null, plan: null };
+    });
+  }, []);
+
   const generate = useCallback((seed: number) => {
     const s = stateRef.current;
-    const layouts = generateLayouts({ room: s.room, needs: s.needs, prefs: { styles: s.styles, moods: s.moods }, budget: s.budget, allocations: s.allocations, seed });
+    const g = geomRef.current;
+    if (!g) return;
+    const layouts = generateLayouts({ geom: g, needs: s.needs, customItems: s.customItems, prefs: { styles: s.styles, moods: s.moods }, budget: s.budget, allocations: s.allocations, seed });
     setState((p) => ({ ...p, layouts, seed, selectedLayoutId: null }));
   }, []);
 
@@ -131,7 +180,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const swap = useCallback((uid: string, productId: string) => {
     const s = stateRef.current;
-    const r = trySwap(s.room, s.plan ?? [], uid, productId, s.budget);
+    const g = geomRef.current;
+    if (!g || !s.plan) return null;
+    const r = trySwap(g, s.plan, uid, productId, s.budget);
     if (r.valid) setState((p) => ({ ...p, plan: r.items }));
     return r;
   }, []);
@@ -139,7 +190,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const reset = useCallback(() => setState(initialState()), []);
   const loadDemo = useCallback(() => setState(demoState()), []);
 
-  const value = useMemo(() => ({ state, ready, update, generate, selectLayout, swap, reset, loadDemo }), [state, ready, update, generate, selectLayout, swap, reset, loadDemo]);
+  const value = useMemo(
+    () => ({ state, ready, geom, update, setApartment, selectKind, generate, selectLayout, swap, reset, loadDemo }),
+    [state, ready, geom, update, setApartment, selectKind, generate, selectLayout, swap, reset, loadDemo],
+  );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 

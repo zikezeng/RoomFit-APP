@@ -9,29 +9,29 @@ import { ProductSheet } from "@/src/components/ProductSheet";
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { PRODUCT_MAP } from "@/src/lib/catalog";
+import { getProduct } from "@/src/lib/catalog";
 import { validateLayout } from "@/src/lib/solver";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function ShopStep() {
   const router = useRouter();
-  const { state } = usePlan();
+  const { state, geom } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
   const [uid, setUid] = useState<string | null>(null);
   const plan = state.plan;
-  const v = plan ? validateLayout(state.room, plan, state.budget) : null;
+  const v = plan && geom ? validateLayout(geom, plan, state.budget) : null;
 
   return (
     <WizardScaffold
-      step={7}
+      step={8}
       title="Shop Your Room"
       subtitle="Tap any piece on the floor plan to see details and swap alternatives."
       cta={plan ? { label: "View final plan", icon: "check", onPress: () => router.push("/plan/results"), testID: "shop-continue-button" } : undefined}
       header={v ? <BudgetBar total={v.total} budget={state.budget} /> : undefined}
     >
-      {!plan || !v ? (
+      {!plan || !v || !geom ? (
         <View style={{ gap: spacing.md }}>
           <Notice tone="warning" text="No layout selected yet — inputs may have changed. Generate and choose a layout first." testID="shop-no-plan" />
           <Button label="Go to layouts" onPress={() => router.replace("/plan/layouts")} testID="shop-go-layouts" />
@@ -39,7 +39,7 @@ export default function ShopStep() {
       ) : (
         <>
           <Card>
-            <FloorPlan room={state.room} items={plan} selectedUid={uid} onPressItem={setUid} testID="shop-floorplan-svg" />
+            <FloorPlan geom={geom!} items={plan} selectedUid={uid} onPressItem={setUid} testID="shop-floorplan-svg" />
             <View style={s.status}>
               <Feather name={v.valid ? "check-circle" : "alert-circle"} size={14} color={v.valid ? colors.success : colors.error} />
               <Text style={s.caption} testID="shop-validity">
@@ -49,7 +49,7 @@ export default function ShopStep() {
           </Card>
           <Text style={s.h}>Items in this room</Text>
           {plan.map((it) => {
-            const p = PRODUCT_MAP[it.productId];
+            const p = getProduct(it.productId);
             return (
               <Pressable key={it.uid} onPress={() => setUid(it.uid)} testID={`shop-item-${it.uid}`} style={({ pressed }) => [s.item, pressed && { opacity: 0.8 }]}>
                 <ProductSwatch category={p.category} style={p.styles[0]} size={52} />

@@ -67,6 +67,14 @@ const light = {
   scrim: "rgba(28,27,26,0.55)",
   wood: "#D9C7AE",
   woodDark: "#A88B6A",
+  // Room segmentation fills (used with transparency over the uploaded plan)
+  roomLiving: "#9CC3E0",
+  roomBedroom: "#A3B19B",
+  roomKitchen: "#E3CFA8",
+  roomBathroom: "#BDBDBD",
+  roomCloset: "#C7B8E3",
+  roomBalcony: "#F0DE8A",
+  roomOther: "#D9C7AE",
 };
 
 export const fonts = { display: "Fraunces", text: "DMSans" };

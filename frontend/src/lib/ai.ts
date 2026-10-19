@@ -1,18 +1,34 @@
-// Integration points for the research pipeline (Python services: U-Net/CubiCasa5K, CLIP, LLM).
-// None are connected in this prototype — the app uses transparent deterministic fallbacks.
+// Floor-plan recognition: a vision LLM (Gemini via backend) proposes rooms/doors/windows as an
+// editable AI suggestion. It does not read real dimensions — the user always calibrates scale.
+// A dedicated model (U-Net / CubiCasa5K) can replace this endpoint later with the same response shape.
+import { RoomKind } from "./types";
 
-export interface FloorPlanDetection {
-  available: boolean;
-  message: string;
+const API = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+export interface DetectionResult {
+  model: string;
+  rooms: { label: string; kind: RoomKind; polygon: number[][] }[];
+  doors: Record<string, number>[];
+  windows: Record<string, number>[];
+  fixtures: (Record<string, number> & { label: string })[];
 }
 
-/** Future: POST the image to a floor-plan recognition API that returns walls/doors/windows. */
-export async function detectFloorPlan(_uri: string): Promise<FloorPlanDetection> {
-  return {
-    available: false,
-    message:
-      "Automatic wall, door and window detection is not connected in this prototype. Please define your room dimensions and openings manually.",
-  };
+export async function detectFloorPlan(base64: string): Promise<DetectionResult> {
+  const res = await fetch(`${API}/api/floorplan/detect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_base64: base64 }),
+  });
+  if (!res.ok) throw new Error(`Recognition failed (${res.status})`);
+  const { job_id } = await res.json();
+  // Poll the background job (vision models can take up to ~1-2 minutes).
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const j = await fetch(`${API}/api/floorplan/detect/${job_id}`).then((r) => r.json());
+    if (j.status === "done") return j.result;
+    if (j.status === "error") throw new Error(j.detail ?? "Recognition failed");
+  }
+  throw new Error("Recognition timed out");
 }
 
 export const STYLE_ENGINE = {

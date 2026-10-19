@@ -16,6 +16,11 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const IMG: Record<StyleId, string> = {
   japandi: "https://images.unsplash.com/photo-1772797583328-f83bc3f94f80?crop=entropy&cs=srgb&fm=jpg&q=80&w=900",
+  modern: "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?fm=jpg&q=80&w=900",
+  minimalist: "https://images.unsplash.com/photo-1513694203232-719a280e022f?fm=jpg&q=80&w=900",
+  traditional: "https://images.unsplash.com/photo-1598928506311-c55ded91a20c?fm=jpg&q=80&w=900",
+  farmhouse: "https://images.unsplash.com/photo-1505691938895-1758d7feb511?fm=jpg&q=80&w=900",
+  bohemian: "https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?fm=jpg&q=80&w=900",
   scandinavian: "https://images.unsplash.com/photo-1693382464372-fad822e7b38c?crop=entropy&cs=srgb&fm=jpg&q=80&w=900",
   midcentury: "https://images.unsplash.com/photo-1724582586495-d050726cf354?crop=entropy&cs=srgb&fm=jpg&q=80&w=900",
   industrial: "https://images.unsplash.com/photo-1505873242700-f289a29e1e0f?crop=entropy&cs=srgb&fm=jpg&q=80&w=900",
@@ -35,7 +40,7 @@ export default function StyleStep() {
 
   return (
     <WizardScaffold
-      step={4}
+      step={5}
       title="Find Your Style"
       subtitle="Pick one or more styles. We'll rank furniture that fits to match your taste."
       cta={{ label: "Continue", disabled: state.styles.length === 0, onPress: () => router.push("/plan/budget"), testID: "style-continue-button" }}

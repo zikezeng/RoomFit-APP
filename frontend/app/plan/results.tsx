@@ -8,21 +8,21 @@ import { ProductSheet } from "@/src/components/ProductSheet";
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { CATEGORY_MAP, PRODUCT_MAP } from "@/src/lib/catalog";
-import { fmtArea, fmtLen } from "@/src/lib/geometry";
+import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
+import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
 import { validateLayout } from "@/src/lib/solver";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing } from "@/src/theme";
 
 export default function ResultsStep() {
   const router = useRouter();
-  const { state, reset } = usePlan();
+  const { state, geom, reset } = usePlan();
   const s = useStyles();
   const [uid, setUid] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const plan = state.plan;
-  const v = plan ? validateLayout(state.room, plan, state.budget) : null;
-  const products = (plan ?? []).map((i) => PRODUCT_MAP[i.productId]);
+  const v = plan && geom ? validateLayout(geom, plan, state.budget) : null;
+  const products = (plan ?? []).map((i) => getProduct(i.productId));
 
   const csv = () => {
     const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
@@ -46,12 +46,12 @@ export default function ResultsStep() {
   };
   const print = async () => {
     if (Platform.OS === "web") window.print();
-    else await Share.share({ message: `My RoomFit plan (${fmtArea(state.room)} living room)\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(v?.total ?? 0)} of ${money(state.budget)}` });
+    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(v?.total ?? 0)} of ${money(state.budget)}` });
   };
 
-  if (!plan || !v) {
+  if (!plan || !v || !geom) {
     return (
-      <WizardScaffold step={8} title="Your RoomFit Plan Is Ready!">
+      <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!">
         <Notice tone="warning" text="No layout selected yet. Choose a layout to see your final plan." testID="results-no-plan" />
         <Button label="Go to layouts" onPress={() => router.replace("/plan/layouts")} testID="results-go-layouts" />
       </WizardScaffold>
@@ -59,9 +59,9 @@ export default function ResultsStep() {
   }
 
   return (
-    <WizardScaffold step={8} title="Your RoomFit Plan Is Ready!" subtitle={`${fmtLen(state.room.width, state.room.unit)} × ${fmtLen(state.room.length, state.room.unit)} living room · ${fmtArea(state.room)}`}>
+    <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={`${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`}>
       <Card style={{ gap: spacing.sm }}>
-        <FloorPlan room={state.room} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
+        <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
         <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, 80 cm walkways, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
