@@ -16,7 +16,11 @@ CubiCasa5K floor plan recognition + 3D model generation for the RoomFit app.
 - `POST /api/floorplan/3d`: 3D model (`.glb`, base64) plus rooms, doors and windows in metres. Used by the "View in 3D" page.
 - `GET /api/`: health check. `GET /docs` shows interactive API docs.
 
-## 部署到 Hugging Face Spaces（免费，只需做一次）
+## 免费方案：用 Google Colab 当服务器（推荐先用这个）
+
+打开 `RoomFit_Server_Colab.ipynb`，上传到 Colab，选 T4 GPU，点「全部运行」。最后一个格子会给出一个网址，按提示填进 `frontend/.env`。Colab 页面要一直开着；重新运行后网址会变。
+
+## 部署到 Hugging Face Spaces（长期运行）
 
 1. 注册并登录 [huggingface.co](https://huggingface.co)。
 2. 点右上角头像 → **New Space**：
