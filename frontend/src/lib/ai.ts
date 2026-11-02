@@ -32,7 +32,7 @@ export async function detectFloorPlan(base64: string): Promise<DetectionResult> 
 }
 
 /** Deterministic wall-based room segmentation (OpenCV on the backend, no AI). Polygons are 0-1000 normalised. */
-export async function segmentFloorPlan(base64: string): Promise<{ method: string; rooms: { polygon: number[][]; area: number }[] }> {
+export async function segmentFloorPlan(base64: string): Promise<{ method: string; rooms: { polygon: number[][]; area: number; type?: RoomKind; label?: string }[] }> {
   const res = await fetch(`${API}/api/floorplan/segment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
