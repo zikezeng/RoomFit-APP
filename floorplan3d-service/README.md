@@ -16,7 +16,11 @@ CubiCasa5K floor plan recognition + 3D model generation for the RoomFit app.
 - `POST /api/floorplan/3d`: 3D model (`.glb`, base64) plus rooms, doors and windows in metres. Used by the "View in 3D" page.
 - `GET /api/`: health check. `GET /docs` shows interactive API docs.
 
-## 免费方案：用 Google Colab 当服务器（推荐先用这个）
+## 最简单：在自己的 Mac 上运行
+
+打开「终端」，运行 `bash start_server_mac.command`（在这个文件夹里）。第一次会自动安装组件（几分钟），之后几秒就能启动。窗口里会显示要填进 `frontend/.env` 的地址。电脑要开着，手机和电脑要连同一个 Wi-Fi。
+
+## 免费方案：用 Google Colab 当服务器
 
 打开 `RoomFit_Server_Colab.ipynb`，上传到 Colab，选 T4 GPU，点「全部运行」。最后一个格子会给出一个网址，按提示填进 `frontend/.env`。Colab 页面要一直开着；重新运行后网址会变。
 
