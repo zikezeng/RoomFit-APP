@@ -52,7 +52,14 @@ export default function UploadStep() {
       try {
         const seg = await segmentFloorPlan(out.base64!);
         rooms = guessKinds(seg.rooms.map((r) => r.polygon.map(([x, y]) => ({ x: (x / 1000) * out.width, y: (y / 1000) * out.height }))), home!);
-        note = rooms.length ? `Found ${rooms.length} enclosed areas by detecting the walls in your image. Room names are suggestions based on size and your ${HOME_TYPES.find((h) => h.id === home)!.label} home type — please confirm them.` : "No enclosed rooms could be detected automatically. Outline the rooms manually in the next step.";
+        // The CubiCasa5K service also names each room (from the model + fixtures found inside it).
+        const named = seg.rooms.some((r) => r.type);
+        if (named) rooms = rooms.map((r, i) => (seg.rooms[i]?.type ? { ...r, kind: seg.rooms[i].type!, label: seg.rooms[i].label ?? r.label } : r));
+        note = rooms.length
+          ? named
+            ? `Found ${rooms.length} rooms with the CubiCasa5K floor plan model. Room names are suggestions — please confirm them.`
+            : `Found ${rooms.length} enclosed areas by detecting the walls in your image. Room names are suggestions based on size and your ${HOME_TYPES.find((h) => h.id === home)!.label} home type — please confirm them.`
+          : "No enclosed rooms could be detected automatically. Outline the rooms manually in the next step.";
       } catch {
         note = "Automatic wall detection failed. Outline the rooms manually in the next step.";
       }
@@ -103,6 +110,7 @@ export default function UploadStep() {
           </Text>
           <Image source={{ uri: ap.imageUri }} style={[s.preview, { aspectRatio: ap.imgW / ap.imgH || 1.3 }]} contentFit="contain" testID="upload-plan-image" />
           {ap.detectionNote ? <Notice tone={ap.detection === "failed" ? "warning" : "info"} text={ap.detectionNote} testID="detection-note" /> : null}
+          <Button kind="secondary" label="View in 3D" icon="box" onPress={() => router.push("/plan/model3d")} testID="view-3d-button" />
         </Card>
       ) : null}
 

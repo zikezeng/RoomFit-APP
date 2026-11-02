@@ -1,0 +1,14 @@
+# torch / torchvision are installed separately from the CPU index (see Dockerfile)
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.10.4
+numpy==2.2.1
+opencv-python-headless==4.10.0.84
+scipy==1.15.0
+scikit-image==0.25.0
+shapely==2.0.6
+trimesh==4.5.3
+mapbox-earcut==1.0.3
+pillow==11.1.0
+tqdm==4.67.1
+gdown==5.2.0
