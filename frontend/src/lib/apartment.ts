@@ -220,8 +220,8 @@ export interface RoomGeom {
 }
 
 export function buildGeom(ap: Apartment, roomId: string | null): RoomGeom | null {
-  const s = scaleOf(ap);
   const room = ap.rooms.find((r) => r.id === roomId);
+  const s = room ? roomScale(ap, room) : null;
   if (!s || !room || room.poly.length < 3) return null;
   const b = bbox(room.poly);
   const T = (p: Pt): Pt => ({ x: (p.x - b.x0) * s, y: (p.y - b.y0) * s });
