@@ -53,8 +53,27 @@ export function distToSeg(p: Pt, a: Pt, b: Pt) {
 export const distToPolyEdges = (p: Pt, poly: Pt[]) => Math.min(...poly.map((a, i) => distToSeg(p, a, poly[(i + 1) % poly.length])));
 
 /** cm per image pixel, or null when uncalibrated. */
-export const scaleOf = (ap: Apartment) => (ap.calib && dist(ap.calib.a, ap.calib.b) > 0 ? ap.calib.cm / dist(ap.calib.a, ap.calib.b) : ap.autoScale);
+export const scaleOf = (ap: Apartment) =>
+  ap.autoScale ??
+  (ap.calib && dist(ap.calib.a, ap.calib.b) > 0
+    ? ap.calib.cm / dist(ap.calib.a, ap.calib.b)
+    : null);
+
 export const SQFT_CM2 = 929.0304;
+
+/** Per-room cm/px.
+ * If the user manually confirms a room's sq ft,
+ * keep the detected room shape but rescale it to match that real-world area.
+ */
+export const roomScale = (ap: Apartment, room: PlanRoom) => {
+  const pxArea = polyArea(room.poly);
+
+  if (room.manualSqft && room.manualSqft > 0 && pxArea > 0) {
+    return Math.sqrt((room.manualSqft * SQFT_CM2) / pxArea);
+  }
+
+  return scaleOf(ap);
+};
 
 export const HOME_TYPES: { id: HomeType; label: string; bed: number; bath: number }[] = [
   { id: "studio", label: "Studio", bed: 0, bath: 1 },
