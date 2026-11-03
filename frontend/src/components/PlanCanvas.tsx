@@ -3,9 +3,12 @@ import React, { useRef, useState } from "react";
 import { GestureResponderEvent, View } from "react-native";
 import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text as SvgText } from "react-native-svg";
 
-import { centroid, roomStats } from "@/src/lib/apartment";
+import { bbox, buildGeom, centroid, roomStats, scaleOf } from "@/src/lib/apartment";
+import { getProduct } from "@/src/lib/catalog";
+import { footprint } from "@/src/lib/solver";
+import { catFill } from "@/src/components/FloorPlan";
 import { fmtAreaCm2 } from "@/src/lib/geometry";
-import { Apartment, Pt, RoomKind } from "@/src/lib/types";
+import { Apartment, PlacedItem, Pt, RoomKind } from "@/src/lib/types";
 import { ThemeColors, fonts, radius, useTheme } from "@/src/theme";
 
 export const roomColor = (c: ThemeColors, k: RoomKind) =>
@@ -13,6 +16,10 @@ export const roomColor = (c: ThemeColors, k: RoomKind) =>
 
 interface Props {
   ap: Apartment;
+  items?: PlacedItem[];
+  selectedUid?: string | null;
+  onPressItem?: (uid: string) => void;
+  selectedRoomIds?: string[];
   selectedRoomId?: string | null;
   edge?: { roomId: string; i: number } | null;
   vertex?: { roomId: string; i: number } | null;
@@ -28,7 +35,7 @@ interface Props {
 }
 
 /** The user's actual floor plan image with an editable room-segmentation overlay (image px space). */
-export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft = [], dimRooms, onTap, onDragStart, onDrag, onDragEnd, testID }: Props) {
+export function PlanCanvas({ ap, items = [], selectedUid, onPressItem, selectedRoomId, selectedRoomIds, edge, vertex, openingId, draft = [], dimRooms, onTap, onDragStart, onDrag, onDragEnd, testID }: Props) {
   const { colors } = useTheme();
   const [w, setW] = useState(0);
   const dragging = useRef(false);
@@ -55,9 +62,9 @@ export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft 
   return (
     <View testID={testID} onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ width: "100%", aspectRatio: W / H, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surfaceSecondary }}>
       {ap.imageUri ? <Image source={{ uri: ap.imageUri }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} contentFit="fill" /> : null}
-      <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", pointerEvents: "none" }}>
+      <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", pointerEvents: onPressItem ? "auto" : "none" }}>
         {ap.rooms.map((r) => {
-          const sel = r.id === selectedRoomId;
+          const sel = selectedRoomIds?.includes(r.id) ?? r.id === selectedRoomId;
           const c = centroid(r.poly);
           const st = roomStats(ap, r);
           const faded = dimRooms?.(r.id);
@@ -96,6 +103,20 @@ export function PlanCanvas({ ap, selectedRoomId, edge, vertex, openingId, draft 
         {draft.map((p, i) => (
           <Circle key={`dp${i}`} cx={p.x} cy={p.y} r={sw * 3} fill={colors.error} />
         ))}
+        {[...items].sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug")).map((item) => {
+          const room = ap.rooms.find((r) => r.id === (item.roomId ?? selectedRoomId));
+          const g = room && buildGeom(ap, room.id);
+          const scale = scaleOf(ap);
+          if (!room || !g || !scale) return null;
+          const b = bbox(room.poly);
+          const product = getProduct(item.productId);
+          const rect = footprint(item, product, g);
+          const x = b.x0 + rect.x / scale, y = b.y0 + rect.y / scale;
+          return <G key={item.uid} onPress={() => onPressItem?.(item.uid)} testID={`${testID}-item-${item.uid}`}>
+            <Rect x={x} y={y} width={rect.w / scale} height={rect.h / scale} rx={2} fill={catFill(colors, item.category)} opacity={item.category === "rug" ? 0.6 : 1} stroke={item.uid === selectedUid ? colors.brandPrimary : colors.onSurface} strokeWidth={item.uid === selectedUid ? sw * 2 : sw / 2} />
+            <SvgText x={x + rect.w / scale / 2} y={y + rect.h / scale / 2} fontSize={fs * 0.5} textAnchor="middle" fill={colors.onSurface}>{product.name.split(" ").slice(0, 2).join(" ")}</SvgText>
+          </G>;
+        })}
       </Svg>
       {onTap ? <View testID={`${testID ?? "plan-canvas"}-touch`} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} onStartShouldSetResponder={() => true} onResponderTerminationRequest={() => !dragging.current} onResponderGrant={grant} onResponderMove={move} onResponderRelease={release} onResponderTerminate={() => dragging.current && ((dragging.current = false), onDragEnd?.())} /> : null}
     </View>

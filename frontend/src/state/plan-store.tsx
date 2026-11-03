@@ -1,12 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { buildGeom, RoomGeom, sampleApartment } from "@/src/lib/apartment";
-import { CATEGORIES, setCustomProducts } from "@/src/lib/catalog";
+import { CATEGORIES, FURNISHABLE, setCustomProducts } from "@/src/lib/catalog";
 import { generateLayouts, trySwap } from "@/src/lib/solver";
 import { Apartment, CategoryId, HomeType, Layout, MoodId, Need, PlacedItem, Product, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
 import { storage } from "@/src/utils/storage";
 
+export type RoomConfig = Pick<PlanState, "needsKind" | "needs" | "customItems" | "budget" | "allocations">;
+
 export interface PlanState {
+  selectedRoomIds: string[];
+  roomConfigs: Record<string, RoomConfig>;
   apartment: Apartment; // uploaded floor plan (reference image)
   room: RoomSpec; // confirmed room dimensions (Step 2)
   dimsConfirmed: boolean;
@@ -61,6 +65,8 @@ export const emptyRoom = (): RoomSpec => ({ width: 0, length: 0, door: { wall: "
 export const SAMPLE_ROOM: RoomSpec = { width: 480, length: 360, door: { wall: "bottom", at: 0.16, width: 90 }, windows: [{ wall: "top", at: 0.5, width: 160 }, { wall: "right", at: 0.5, width: 120 }] };
 
 export const initialState = (): PlanState => ({
+  selectedRoomIds: [],
+  roomConfigs: {},
   apartment: emptyApartment(),
   room: emptyRoom(),
   dimsConfirmed: false,
@@ -87,8 +93,31 @@ export const demoState = (): PlanState => {
   needs.side_table = { qty: 1, priority: "optional" };
   needs.floor_lamp = { qty: 1, priority: "essential" };
   needs.rug = { qty: 1, priority: "optional" };
-  return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
+  return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", selectedRoomIds: ["r-liv"], needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
 };
+
+export const configOf = (s: RoomConfig): RoomConfig => ({ needsKind: s.needsKind, needs: s.needs, customItems: s.customItems, budget: s.budget, allocations: s.allocations });
+export const configsOf = (s: PlanState) => s.selectedRoomId ? { ...s.roomConfigs, [s.selectedRoomId]: configOf(s) } : s.roomConfigs;
+export const totalBudget = (s: PlanState) => s.selectedRoomIds.reduce((sum, id) => sum + (configsOf(s)[id]?.budget ?? 0), 0);
+export const itemCount = (c: RoomConfig) => c.customItems.length + Object.values(c.needs).reduce((sum, n) => sum + (n?.qty ?? 0), 0);
+function activateRoom(s: PlanState, id: string): PlanState {
+  const room = s.apartment.rooms.find((r) => r.id === id)!;
+  const saved = configsOf(s);
+  const c = saved[id];
+  const config = c?.needsKind === room.kind ? c : { ...configOf(initialState()), needsKind: room.kind, needs: defaultNeeds(room.kind, s.apartment.homeType) };
+  return { ...s, ...config, roomKind: room.kind, selectedRoomId: id, roomConfigs: { ...saved, [id]: config } };
+}
+
+/** Upgrade saved single-room sessions without discarding furniture or budgets. */
+export function restoreState(saved: Partial<PlanState>): PlanState {
+  let s = { ...initialState(), ...saved };
+  const ids = (saved.selectedRoomIds ?? (saved.selectedRoomId ? [saved.selectedRoomId] : []))
+    .filter((id) => s.apartment.rooms.some((r) => r.id === id && FURNISHABLE.includes(r.kind)));
+  const active = ids.includes(s.selectedRoomId!) ? s.selectedRoomId : ids[0];
+  s = { ...s, selectedRoomIds: ids };
+  for (const id of ids) s = activateRoom(s, id);
+  return active ? activateRoom(s, active) : { ...s, selectedRoomId: null, roomKind: null };
+}
 
 type Invalidate = "all" | "layouts" | "none";
 const KEY = "roomfit_state_v4";
@@ -101,6 +130,7 @@ interface Ctx {
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
   selectRoom: (id: string) => void;
+  toggleRoom: (id: string) => void;
   generate: (seed: number) => void;
   selectLayout: (id: string) => void;
   swap: (uid: string, productId: string) => ReturnType<typeof trySwap> | null;
@@ -115,13 +145,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
-  setCustomProducts(state.customItems);
+  setCustomProducts([...Object.values(configsOf(state)).flatMap((c) => c.customItems)]);
 
   useEffect(() => {
     Promise.all([storage.getItem(KEY, null as string | null), storage.getItem(IMG_KEY, null as string | null)]).then(([raw, img]) => {
       if (raw) {
         try {
-          const s = { ...initialState(), ...(JSON.parse(raw) as PlanState) };
+          const s = restoreState(JSON.parse(raw));
           s.apartment = { ...s.apartment, imageUri: img };
           setState(s);
         } catch {}
@@ -144,17 +174,16 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [state, ready]);
 
   const geom = useMemo(() => buildGeom(state.apartment, state.selectedRoomId), [state.apartment, state.selectedRoomId]);
-  const geomRef = useRef(geom);
-  geomRef.current = geom;
 
   const update = useCallback((patch: Partial<PlanState>, invalidate: Invalidate = "none") => {
     setState((s) => {
       const n = { ...s, ...patch };
+      if (n.selectedRoomId) n.roomConfigs = { ...n.roomConfigs, [n.selectedRoomId]: configOf(n) };
       if (invalidate !== "none") {
         n.layouts = null;
         n.selectedLayoutId = null;
       }
-      if (invalidate === "all") n.plan = null;
+      if (invalidate !== "none") n.plan = null;
       return n;
     });
   }, []);
@@ -163,25 +192,48 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const setApartment = useCallback((fn: (a: Apartment) => Apartment) => {
     setState((s) => {
       const apartment = fn(s.apartment);
-      const keepRoom = apartment.rooms.some((r) => r.id === s.selectedRoomId);
-      return { ...s, apartment, selectedRoomId: keepRoom ? s.selectedRoomId : null, layouts: null, selectedLayoutId: null, plan: null };
+      const ids = s.selectedRoomIds.filter((id) => apartment.rooms.some((r) => r.id === id && FURNISHABLE.includes(r.kind)));
+      const active = ids.includes(s.selectedRoomId!) ? s.selectedRoomId : ids[0] ?? null;
+      let next: PlanState = { ...s, apartment, selectedRoomIds: ids, layouts: null, selectedLayoutId: null, plan: null };
+      for (const id of ids) next = activateRoom(next, id);
+      return active ? activateRoom(next, active) : { ...next, selectedRoomId: null, roomKind: null };
     });
   }, []);
 
   const selectRoom = useCallback((id: string) => {
+    setState((s) => s.selectedRoomIds.includes(id) ? activateRoom(s, id) : s);
+  }, []);
+  const toggleRoom = useCallback((id: string) => {
     setState((s) => {
       const room = s.apartment.rooms.find((r) => r.id === id);
-      if (!room || s.selectedRoomId === id) return s;
-      const sameKind = s.needsKind === room.kind;
-      return { ...s, selectedRoomId: id, roomKind: room.kind, needsKind: room.kind, needs: sameKind ? s.needs : defaultNeeds(room.kind, s.apartment.homeType), layouts: null, selectedLayoutId: null, plan: null };
+      if (!room || !FURNISHABLE.includes(room.kind)) return s;
+      const ids = s.selectedRoomIds.includes(id) ? s.selectedRoomIds.filter((x) => x !== id) : [...s.selectedRoomIds, id];
+      const next = { ...s, roomConfigs: configsOf(s), selectedRoomIds: ids, layouts: null, selectedLayoutId: null, plan: null };
+      const active = ids.includes(s.selectedRoomId!) ? s.selectedRoomId : ids[0];
+      return active ? activateRoom(ids.includes(id) ? activateRoom(next, id) : next, active) : { ...next, selectedRoomId: null, roomKind: null };
     });
   }, []);
 
   const generate = useCallback((seed: number) => {
     const s = stateRef.current;
-    const g = geomRef.current;
-    if (!g) return;
-    const layouts = generateLayouts({ geom: g, needs: s.needs, customItems: s.customItems, prefs: { styles: s.styles, moods: s.moods }, budget: s.budget, allocations: s.allocations, seed });
+    const configs = configsOf(s);
+    const sets = s.selectedRoomIds.map((id) => {
+      const g = buildGeom(s.apartment, id);
+      return g ? generateLayouts({ geom: g, ...configs[id], prefs: { styles: s.styles, moods: s.moods }, seed }) : null;
+    });
+    if (!sets.length || sets.some((x) => !x)) return;
+    const layouts = [0, 1, 2].map((index): Layout => {
+      // A room may fit only one strategy. Reuse its valid strategy rather than
+      // rejecting an otherwise feasible apartment because variant indices differ.
+      const parts = sets.map((set) => sets.length === 1 || set![index].valid ? set![index] : set!.find((l) => l.valid) ?? set![index]);
+      const label = (i: number) => s.apartment.rooms.find((r) => r.id === s.selectedRoomIds[i])!.label;
+      return { ...parts[0], id: `s${seed}-${index}`, name: parts.length === 1 ? parts[0].name : `Layout ${"ABC"[index]} — All rooms`,
+        tagline: parts.length === 1 ? parts[0].tagline : "Furniture placed and checked in every selected room.",
+        valid: parts.every((p) => p.valid), total: parts.reduce((sum, p) => sum + p.total, 0),
+        items: parts.flatMap((p, i) => p.items.map((item) => ({ ...item, roomId: s.selectedRoomIds[i], uid: parts.length === 1 ? item.uid : `${s.selectedRoomIds[i]}:${item.uid}` }))),
+        checks: parts.flatMap((p, i) => p.checks.map((c) => ({ ...c, id: `${i}:${c.id}`, label: parts.length === 1 ? c.label : `${label(i)}: ${c.label}` }))),
+        problems: parts.flatMap((p, i) => p.problems.map((v) => `${label(i)}: ${v}`)), suggestions: parts.flatMap((p) => p.suggestions) };
+    });
     setState((p) => ({ ...p, layouts, seed, selectedLayoutId: null }));
   }, []);
 
@@ -194,10 +246,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const swap = useCallback((uid: string, productId: string) => {
     const s = stateRef.current;
-    const g = geomRef.current;
+    const item = s.plan?.find((i) => i.uid === uid);
+    const id = item?.roomId ?? s.selectedRoomId;
+    const g = buildGeom(s.apartment, id);
     if (!g || !s.plan) return null;
-    const r = trySwap(g, s.plan, uid, productId, s.budget);
-    if (r.valid) setState((p) => ({ ...p, plan: r.items }));
+    const items = s.plan.filter((i) => (i.roomId ?? s.selectedRoomId) === id);
+    const r = trySwap(g, items, uid, productId, configsOf(s)[id!]?.budget ?? s.budget);
+    if (r.valid) setState((p) => ({ ...p, plan: p.plan!.map((i) => r.items.find((x) => x.uid === i.uid) ?? i) }));
     return r;
   }, []);
 
@@ -205,8 +260,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const loadDemo = useCallback(() => setState(demoState()), []);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartment, selectRoom, generate, selectLayout, swap, reset, loadDemo }),
-    [state, ready, geom, update, setApartment, selectRoom, generate, selectLayout, swap, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartment, selectRoom, toggleRoom, generate, selectLayout, swap, reset, loadDemo }),
+    [state, ready, geom, update, setApartment, selectRoom, toggleRoom, generate, selectLayout, swap, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

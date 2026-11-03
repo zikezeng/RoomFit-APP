@@ -1,5 +1,5 @@
 import Feather from "@react-native-vector-icons/feather";
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -7,21 +7,24 @@ import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Notice, money } from "@/src/components/ui";
 import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
-import { usePlan } from "@/src/state/plan-store";
+import { buildGeom } from "@/src/lib/apartment";
+import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: () => void }) {
-  const { state, geom, swap } = usePlan();
+  const { state, swap } = usePlan();
   const insets = useSafeAreaInsets();
   const s = useStyles();
   const { colors } = useTheme();
   const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const item = state.plan?.find((i) => i.uid === uid);
+  const roomId = item?.roomId ?? state.selectedRoomId;
+  const geom = buildGeom(state.apartment, roomId);
+  const budget = configsOf(state)[roomId!]?.budget ?? state.budget;
   const p = item ? getProduct(item.productId) : null;
-  const alts = useMemo(
-    () => (item && state.plan && geom ? alternativesFor(geom, state.plan, item.uid, state.budget, { styles: state.styles, moods: state.moods }) : []),
-    [item, state.plan, geom, state.budget, state.styles, state.moods],
-  );
+  const alts = item && state.plan && geom
+    ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
+    : [];
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;

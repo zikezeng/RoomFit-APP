@@ -14,7 +14,7 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
   const router = useRouter();
-  const { state, geom, selectRoom } = usePlan();
+  const { state, geom, toggleRoom } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
   const ap = state.apartment;
@@ -27,17 +27,17 @@ export default function RoomsStep() {
   return (
     <WizardScaffold
       step={3}
-      title="Which Room Would You Like to Furnish?"
-      subtitle="Tap a room on your plan. Each room type gets its own furniture list, and every piece stays inside that room's real walls."
-      cta={{ label: sel ? `Furnish ${sel.label}` : "Select a room", disabled: !supported || !geom, onPress: () => router.push("/plan/furniture"), testID: "rooms-continue-button" }}
+      title="Which Rooms Would You Like to Furnish?"
+      subtitle="Tap rooms on your plan or select their cards. Each room type gets its own furniture list, and every piece stays inside that room's real walls."
+      cta={{ label: state.selectedRoomIds.length ? `Furnish ${state.selectedRoomIds.length} room${state.selectedRoomIds.length === 1 ? "" : "s"}` : "Select a room", disabled: !state.selectedRoomIds.length || !geom, onPress: () => router.push("/plan/furniture"), testID: "rooms-continue-button" }}
     >
       <PlanCanvas
         ap={ap}
-        selectedRoomId={state.selectedRoomId}
+        selectedRoomIds={state.selectedRoomIds}
         dimRooms={(id) => !FURNISHABLE.includes(ap.rooms.find((r) => r.id === id)!.kind)}
         onTap={(p) => {
           const hit = ap.rooms.find((r) => pointInPoly(p, r.poly));
-          if (hit) selectRoom(hit.id);
+          if (hit) toggleRoom(hit.id);
         }}
         testID="rooms-canvas"
       />
@@ -45,9 +45,9 @@ export default function RoomsStep() {
       {rooms.map((r) => {
         const st = roomStats(ap, r);
         const ok = FURNISHABLE.includes(r.kind);
-        const on = r.id === state.selectedRoomId;
+        const on = state.selectedRoomIds.includes(r.id);
         return (
-          <Pressable key={r.id} testID={`select-room-${r.kind}-${r.id}`} onPress={() => selectRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
+          <Pressable key={r.id} testID={`select-room-${r.kind}-${r.id}`} disabled={!ok} accessibilityRole="checkbox" accessibilityState={{ checked: on, disabled: !ok }} onPress={() => toggleRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
             <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{r.label}</Text>

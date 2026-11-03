@@ -3,11 +3,11 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import { FloorPlan } from "@/src/components/FloorPlan";
+import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { getProduct } from "@/src/lib/catalog";
-import { usePlan } from "@/src/state/plan-store";
+import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function LayoutsStep() {
@@ -36,7 +36,7 @@ export default function LayoutsStep() {
     <WizardScaffold
       step={7}
       title="Your Personalized Room Designs"
-      subtitle={`Computed by a deterministic constraint solver inside the real outline of ${geom?.label ?? "your room"} — walls, doors, windows, fixed fixtures, furniture and budget.`}
+      subtitle={`Computed by a deterministic constraint solver inside the real outline of ${state.selectedRoomIds.length > 1 ? "your selected rooms" : geom?.label ?? "your room"} — walls, doors, windows, fixed fixtures, furniture and budget.`}
       cta={{ label: "Shop this layout", icon: "shopping-bag", disabled: !state.selectedLayoutId, onPress: () => router.push("/plan/shop"), testID: "layouts-continue-button" }}
       secondary={{ label: "Regenerate", onPress: () => run(state.seed + 1), testID: "regenerate-layouts-button" }}
     >
@@ -50,7 +50,7 @@ export default function LayoutsStep() {
       ) : (
         <>
           <Text style={s.p} testID="layouts-summary">
-            Set #{state.seed + 1} · {validCount} of {layouts.length} layouts satisfy every constraint. Budget {money(state.budget)}.
+            Set #{state.seed + 1} · {validCount} of {layouts.length} layouts satisfy every constraint. Budget {money(totalBudget(state))}.
           </Text>
           {validCount === 0 ? <Notice tone="error" text="No valid layout for this combination. Remove optional furniture, choose a larger room measurement, or raise the budget." testID="no-valid-layouts" /> : null}
           {layouts.map((l, idx) => {
@@ -71,7 +71,7 @@ export default function LayoutsStep() {
                 </View>
                 {l.valid ? (
                   <>
-                    {geom ? <FloorPlan geom={geom} items={l.items} testID={`layout-plan-${idx}`} /> : null}
+                    {geom ? <ConfiguredPlan items={l.items} testID={`layout-plan-${idx}`} /> : null}
                     <View style={s.checks}>
                       {l.checks.map((c) => (
                         <View key={c.id} style={s.check}>
@@ -81,7 +81,7 @@ export default function LayoutsStep() {
                       ))}
                     </View>
                     <Text style={s.caption}>{l.items.map((i) => getProduct(i.productId).name).join(" · ")}</Text>
-                    <Text style={s.caption}>Remaining budget: {money(state.budget - l.total)}</Text>
+                    <Text style={s.caption}>Remaining budget: {money(totalBudget(state) - l.total)}</Text>
                     <Button kind={sel ? "primary" : "secondary"} small icon={sel ? "check" : undefined} label={sel ? "Selected" : "Choose this layout"} onPress={() => selectLayout(l.id)} testID={`select-layout-${idx}`} />
                   </>
                 ) : (

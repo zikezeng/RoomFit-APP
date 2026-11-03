@@ -3,15 +3,15 @@ import React, { useState } from "react";
 import { Platform, Share, Text, View } from "react-native";
 
 import { BudgetBar } from "@/src/components/BudgetBar";
-import { FloorPlan } from "@/src/components/FloorPlan";
+import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { ProductSheet } from "@/src/components/ProductSheet";
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
-import { validateLayout } from "@/src/lib/solver";
-import { usePlan } from "@/src/state/plan-store";
+import { validatePlan } from "@/src/lib/multi-room";
+import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing } from "@/src/theme";
 
 export default function ResultsStep() {
@@ -21,14 +21,14 @@ export default function ResultsStep() {
   const [uid, setUid] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const plan = state.plan;
-  const v = plan && geom ? validateLayout(geom, plan, state.budget) : null;
+  const v = plan && geom ? validatePlan(state, plan) : null;
   const products = (plan ?? []).map((i) => getProduct(i.productId));
 
   const csv = () => {
     const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
     const rows = [["Category", "Name", "Width (cm)", "Depth (cm)", "Height (cm)", "Price (USD)", "Retailer", "Link"]];
     products.forEach((p) => rows.push([CATEGORY_MAP[p.category].label, p.name, String(p.width), String(p.depth), String(p.height), String(p.price), p.retailer, p.url ?? "Not verified (demo)"]));
-    rows.push(["", "TOTAL", "", "", "", String(v?.total ?? 0), "", ""], ["", "BUDGET", "", "", "", String(state.budget), "", ""]);
+    rows.push(["", "TOTAL", "", "", "", String(v?.total ?? 0), "", ""], ["", "BUDGET", "", "", "", String(totalBudget(state)), "", ""]);
     return rows.map((r) => r.map(esc).join(",")).join("\n");
   };
   const download = async () => {
@@ -46,7 +46,7 @@ export default function ResultsStep() {
   };
   const print = async () => {
     if (Platform.OS === "web") window.print();
-    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(v?.total ?? 0)} of ${money(state.budget)}` });
+    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(v?.total ?? 0)} of ${money(totalBudget(state))}` });
   };
 
   if (!plan || !v || !geom) {
@@ -59,18 +59,18 @@ export default function ResultsStep() {
   }
 
   return (
-    <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={`${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`}>
+    <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={state.selectedRoomIds.length > 1 ? `${state.selectedRoomIds.length} furnished rooms` : `${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`}>
       <Card style={{ gap: spacing.sm }}>
-        <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
+        <ConfiguredPlan items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
         <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, walkways clear, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
         <Text style={s.h}>Budget summary</Text>
         <View style={s.stats}>
           {[
-            ["Budget", state.budget, "summary-budget"],
+            ["Budget", totalBudget(state), "summary-budget"],
             ["Furniture", v.total, "summary-total"],
-            ["Remaining", state.budget - v.total, "summary-remaining"],
+            ["Remaining", totalBudget(state) - v.total, "summary-remaining"],
           ].map(([k, n, id]) => (
             <View key={k as string} style={s.stat}>
               <Text style={s.k}>{k}</Text>
@@ -80,7 +80,7 @@ export default function ResultsStep() {
             </View>
           ))}
         </View>
-        <BudgetBar total={v.total} budget={state.budget} />
+        <BudgetBar total={v.total} budget={totalBudget(state)} />
       </Card>
       <Text style={s.h}>Shopping list</Text>
       {products.map((p, i) => (

@@ -103,6 +103,7 @@ export interface Apartment {
 export type HomeType = "studio" | "1b1b" | "2b1b" | "2b2b" | "3b2b";
 
 export interface PlacedItem {
+  roomId?: string; // coordinates are local to this room
   uid: string;
   category: CategoryId;
   productId: string;

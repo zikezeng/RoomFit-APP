@@ -1,14 +1,15 @@
 import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
 import { Card, Notice, money } from "@/src/components/ui";
+import { RoomTabs } from "@/src/components/RoomTabs";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORIES } from "@/src/lib/catalog";
 import { typicalCost } from "@/src/lib/ranking";
 import { perUnitAllocation } from "@/src/lib/solver";
-import { usePlan } from "@/src/state/plan-store";
+import { configsOf, itemCount, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const MIN = 300;
@@ -16,6 +17,11 @@ const MAX = 15000;
 const CHANGE_AMOUNT = 50;
 
 export default function BudgetStep() {
+  const { state } = usePlan();
+  return <RoomBudget key={state.selectedRoomId} />;
+}
+
+function RoomBudget() {
   const router = useRouter();
   const { state, update } = usePlan();
   const s = useStyles();
@@ -23,9 +29,11 @@ export default function BudgetStep() {
   const [text, setText] = useState(String(state.budget));
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => setText(String(state.budget)), [state.budget]);
-
-  const setBudget = (v: number) => update({ budget: Math.round(v) }, "layouts");
+  const setBudget = (v: number) => {
+    setText(String(Math.round(v)));
+    setErr(null);
+    update({ budget: Math.round(v) }, "layouts");
+  };
   const onText = (t: string) => {
     const clean = t.replace(/[^0-9]/g, "");
     setText(clean);
@@ -79,21 +87,28 @@ export default function BudgetStep() {
     update({ allocations: { ...state.allocations, [id]: nextWeight } }, "layouts");
   };
 
+  const configs = configsOf(state);
+  const missingBudget = state.selectedRoomIds.some((id) => {
+    const c = configs[id];
+    return !c || itemCount(c) === 0 || c.budget <= c.customItems.reduce((sum, p) => sum + p.price, 0);
+  });
+
   return (
     <WizardScaffold
       step={6}
       title="Let's Plan Your Budget"
-      subtitle="Choose your total budget, then decide how much to spend on each furniture category."
+      subtitle="Set the budget for this room, then decide how much to spend on each furniture category."
       cta={{
         label: "Generate layouts",
         icon: "grid",
-        disabled: !!err || pool <= 0 || selected.length === 0,
+        disabled: !!err || !state.selectedRoomIds.length || missingBudget,
         onPress: () => router.push("/plan/layouts"),
         testID: "budget-continue-button",
       }}
     >
+      <RoomTabs />
       <Card style={{ gap: spacing.md }}>
-        <Text style={s.k}>Total budget</Text>
+        <Text style={s.k}>{state.apartment.rooms.find((r) => r.id === state.selectedRoomId)?.label} budget</Text>
         <View style={s.amountRow}>
           <Text style={s.dollar}>$</Text>
           <TextInput
