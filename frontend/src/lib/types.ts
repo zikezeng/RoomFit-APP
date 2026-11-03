@@ -69,6 +69,7 @@ export interface PlanRoom {
   kind: RoomKind;
   label: string;
   poly: Pt[];
+  manualSqft?: number | null;
 }
 export interface PlanOpening {
   id: string;
