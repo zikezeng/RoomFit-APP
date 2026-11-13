@@ -5,15 +5,15 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { PlanCanvas, roomColor } from "@/src/components/PlanCanvas";
 import { Button, Card, Chip, Notice } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { HOME_TYPES, KIND_LABEL, ROOM_KINDS, dist, distToSeg, estimateScale, homeTypeWarnings, pointInPoly, roomStats, scaleOf, uid } from "@/src/lib/apartment";
-import { fmtAreaCm2, fmtLen, fromUnit } from "@/src/lib/geometry";
-import { Apartment, Pt, Unit } from "@/src/lib/types";
+import { KIND_LABEL, ROOM_KINDS, SQFT_CM2, dist, distToSeg, estimateScale, homeTypeWarnings, pointInPoly, roomStats, scaleOf, uid } from "@/src/lib/apartment";
+import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
+import { Apartment, Pt } from "@/src/lib/types";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 type Mode = "select" | "draw" | "corners" | "door";
 const MODES: { id: Mode; label: string; hint: string }[] = [
-  { id: "select", label: "Select room", hint: "Tap a room to select it, then set its type below. Tap close to a wall line to pick that wall for measuring." },
+  { id: "select", label: "Select room", hint: "Tap a room to select it, then confirm or correct its type and size below." },
   { id: "draw", label: "Add room", hint: "Tap “Add rectangle” for a quick box you can then reshape, or tap each corner of a missing room in order and press Finish room." },
   { id: "corners", label: "Edit corners", hint: "Drag any corner to move it. Tap on a wall line to add a corner; tap a corner and press Delete corner to remove it." },
   { id: "door", label: "Mark door", hint: "Tap both ends of a door opening so furniture never blocks it." },
@@ -27,19 +27,18 @@ export default function DimensionsStep() {
   const ap = state.apartment;
   const [mode, setMode] = useState<Mode>("select");
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [edge, setEdge] = useState<{ roomId: string; i: number } | null>(null);
   const [vertex, setVertex] = useState<{ roomId: string; i: number } | null>(null);
   const [draft, setDraft] = useState<Pt[]>([]);
-  const [len, setLen] = useState("");
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [areaText, setAreaText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragV = useRef<{ roomId: string; i: number } | null>(null);
   const room = ap.rooms.find((r) => r.id === roomId);
   const scale = scaleOf(ap);
   const warnings = homeTypeWarnings(ap);
-  const home = HOME_TYPES.find((h) => h.id === ap.homeType);
 
-  // Room edits keep the size-based scale estimate in sync (wall calibration overrides it).
+  // Room edits keep the apartment-size scale estimate in sync.
   const setRooms = (fn: (r: Apartment["rooms"]) => Apartment["rooms"]) =>
     setApartment((a) => {
       const rooms = fn(a.rooms);
@@ -67,15 +66,7 @@ export default function DimensionsStep() {
       if (hit) return setRoomId(hit.id);
       return setErr(room ? "Drag a corner, or tap on a wall line to add one." : "Tap a room to edit its corners.");
     }
-    for (const r of ap.rooms) {
-      const ei = r.poly.findIndex((q, i) => distToSeg(p, q, r.poly[(i + 1) % r.poly.length]) <= tol * 0.7);
-      if (ei >= 0) {
-        setRoomId(r.id);
-        return setEdge({ roomId: r.id, i: ei });
-      }
-    }
     setRoomId(ap.rooms.find((r) => pointInPoly(p, r.poly))?.id ?? null);
-    setEdge(null);
   };
 
   // Corner dragging (Edit corners mode): grab the nearest corner of the selected room, or of any room.
@@ -87,7 +78,6 @@ export default function DimensionsStep() {
       if (vi >= 0) {
         setErr(null);
         setRoomId(r.id);
-        setEdge(null);
         setVertex({ roomId: r.id, i: vi });
         dragV.current = { roomId: r.id, i: vi };
         setDragging(true);
@@ -116,7 +106,6 @@ export default function DimensionsStep() {
     setRooms((rs) => [...rs, { id, kind: "other", label: `Room ${rs.length + 1}`, poly: [{ x: x0, y: y0 }, { x: x0 + w, y: y0 }, { x: x0 + w, y: y0 + h }, { x: x0, y: y0 + h }] }]);
     setDraft([]);
     setRoomId(id);
-    setEdge(null);
     setMode("corners");
   };
 
@@ -129,20 +118,38 @@ export default function DimensionsStep() {
     setMode("select");
   };
 
-  const calibrate = () => {
-    if (!edge) return setErr("Pick a wall first.");
-    const v = parseFloat(len.replace(",", "."));
-    const cm = fromUnit(v, ap.unit);
-    if (!isFinite(v) || cm < 50 || cm > 3000) return setErr("Enter a realistic wall length.");
-    const r = ap.rooms.find((x) => x.id === edge.roomId)!;
-    setApartment((a) => ({ ...a, calib: { a: r.poly[edge.i], b: r.poly[(edge.i + 1) % r.poly.length], cm } }));
+  const beginAreaEdit = (r: Apartment["rooms"][number]) => {
+    const st = roomStats(ap, r);
+    const sqft = r.manualSqft ?? (st ? st.area / SQFT_CM2 : null);
+    setAreaText(sqft ? String(Math.round(sqft)) : "");
+    setEditingRoomId(r.id);
+    setErr(null);
+  };
+
+  const saveAreaEdit = (r: Apartment["rooms"][number]) => {
+    const sqft = parseFloat(areaText.replace(",", "."));
+    if (!isFinite(sqft) || sqft < 10 || sqft > 10000) {
+      setErr("Enter a realistic room size between 10 and 10,000 sq ft.");
+      return;
+    }
+    editRoom(r.id, { manualSqft: sqft });
+    setEditingRoomId(null);
+    setAreaText("");
+    setErr(null);
+  };
+
+  const useEstimatedArea = (r: Apartment["rooms"][number]) => {
+    editRoom(r.id, { manualSqft: null });
+    setEditingRoomId(null);
+    setAreaText("");
+    setErr(null);
   };
 
   return (
     <WizardScaffold
       step={2}
-      title="Make Sure Everything Fits"
-      subtitle="Your real floor plan with its detected rooms. Confirm each room's type, fix anything that's wrong, and check the scale."
+      title="Confirm Your Space"
+      subtitle="We estimated each room from your floor plan. Review the results and edit any room if you know the exact size."
       cta={{ label: "Confirm rooms", disabled: !scale || ap.rooms.length === 0, onPress: () => router.push("/plan/rooms"), testID: "confirm-dimensions-button" }}
       scrollEnabled={!dragging}
     >
@@ -153,7 +160,7 @@ export default function DimensionsStep() {
         ))}
       </ScrollView>
       <Text style={s.p}>{MODES.find((m) => m.id === mode)!.hint}</Text>
-      <PlanCanvas ap={ap} selectedRoomId={roomId} edge={edge} vertex={vertex} draft={draft} onTap={onTap} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={() => ((dragV.current = null), setDragging(false))} testID="editor-canvas" />
+      <PlanCanvas ap={ap} selectedRoomId={roomId} vertex={vertex} draft={draft} onTap={onTap} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={() => ((dragV.current = null), setDragging(false))} testID="editor-canvas" />
       {mode === "draw" && !draft.length ? <Button small icon="square" label="Add rectangle" onPress={addRect} testID="add-rect-room-button" /> : null}
       {mode === "corners" && room && vertex?.roomId === room.id ? (
         <View style={s.row}>
@@ -185,50 +192,59 @@ export default function DimensionsStep() {
           <Text style={s.p} testID="room-dims-text">
             {(() => {
               const st = roomStats(ap, room);
-              return st ? `About ${fmtLen(st.w, ap.unit)} × ${fmtLen(st.l, ap.unit)} · ${fmtAreaCm2(st.area, ap.unit)}` : "Uncalibrated";
+              return st ? `${room.manualSqft ? "User-confirmed size" : "Estimated size"}: ${fmtLen(st.w, ap.unit)} × ${fmtLen(st.l, ap.unit)} · ${fmtAreaCm2(st.area, ap.unit)}` : "Uncalibrated";
             })()}
           </Text>
-          <Button small kind="secondary" icon="trash-2" label="Remove this area" onPress={() => (setRooms((rs) => rs.filter((r) => r.id !== room.id)), setRoomId(null), setEdge(null))} testID="delete-room-button" />
+          <Button small kind="secondary" icon="trash-2" label="Remove this area" onPress={() => (setRooms((rs) => rs.filter((r) => r.id !== room.id)), setRoomId(null))} testID="delete-room-button" />
         </Card>
       ) : null}
-
-      <Card style={{ gap: spacing.md }} testID="calibration-card">
-        <Text style={s.h}>Scale</Text>
-        <Text style={[s.badge, { backgroundColor: scale ? colors.brandTertiary : colors.surfaceTertiary }]} testID="calibration-status">
-          {ap.calib ? `Measured wall: ${fmtLen(ap.calib.cm, ap.unit)}` : scale ? `Estimated from your ${ap.sizeSqft} sq ft${home ? ` ${home.label}` : ""}` : "Uncalibrated"}
-        </Text>
-        <Text style={s.p}>For better accuracy, select a room, pick a wall you know and enter its real length.</Text>
-        {room ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
-            {room.poly.map((_, i) => (
-              <Chip key={i} label={`Wall ${i + 1}`} selected={edge?.roomId === room.id && edge.i === i} onPress={() => setEdge({ roomId: room.id, i })} testID={`wall-chip-${i}`} />
-            ))}
-          </ScrollView>
-        ) : null}
-        <View style={s.row}>
-          <TextInput testID="known-wall-input" style={[s.input, { flex: 1 }]} keyboardType="decimal-pad" value={len} onChangeText={setLen} placeholder={`Wall length in ${ap.unit}`} placeholderTextColor={colors.muted} />
-          <Button small label="Set" onPress={calibrate} testID="apply-scale-button" disabled={!edge} />
-        </View>
-        <View style={s.row}>
-          {(["ft", "m"] as Unit[]).map((u) => (
-            <Chip key={u} label={u === "m" ? "Meters" : "Feet"} selected={ap.unit === u} onPress={() => setApartment((a) => ({ ...a, unit: u }))} testID={`unit-${u}-chip`} />
-          ))}
-        </View>
-      </Card>
 
       <Text style={s.h}>Rooms ({ap.rooms.length})</Text>
       {ap.rooms.map((r, i) => {
         const st = roomStats(ap, r);
+        const editing = editingRoomId === r.id;
         return (
-          <Pressable key={r.id} onPress={() => (setRoomId(r.id), setEdge(null), setMode("select"))} style={[s.roomRow, roomId === r.id && { borderColor: colors.brandPrimary }]} testID={`room-row-${i}`}>
-            <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.name}>{r.label}</Text>
-              <Text style={s.p}>
-                {KIND_LABEL[r.kind]} · {st ? fmtAreaCm2(st.area, ap.unit) : "Uncalibrated"}
-              </Text>
+          <View key={r.id} style={[s.roomCard, roomId === r.id && { borderColor: colors.brandPrimary }]} testID={`room-row-${i}`}>
+            <View style={s.roomSummary}>
+              <Pressable onPress={() => (setRoomId(r.id), setMode("select"))} style={s.roomSelect}>
+                <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.name}>{r.label}</Text>
+                  <Text style={s.p}>
+                    {KIND_LABEL[r.kind]} · {st ? fmtAreaCm2(st.area, ap.unit) : "Uncalibrated"}
+                  </Text>
+                  <Text style={s.meta}>{r.manualSqft ? "User confirmed" : "Estimated from floor plan"}</Text>
+                </View>
+              </Pressable>
+              <Button small kind="secondary" label="Edit size" onPress={() => beginAreaEdit(r)} testID={`edit-room-size-${i}`} />
             </View>
-          </Pressable>
+
+            {editing ? (
+              <View style={s.sizeEditor} testID={`room-size-editor-${i}`}>
+                <Text style={s.k}>Room area (sq ft)</Text>
+                <TextInput
+                  testID={`room-size-input-${i}`}
+                  style={s.input}
+                  keyboardType="decimal-pad"
+                  value={areaText}
+                  onChangeText={(t) => setAreaText(t.replace(/[^0-9.]/g, ""))}
+                  placeholder="e.g. 180"
+                  placeholderTextColor={colors.muted}
+                />
+                <Text style={s.meta}>
+                  If you know the exact area, enter it here. We’ll keep the detected room shape and recalculate its real-world dimensions.
+                </Text>
+                <View style={s.row}>
+                  <Button small label="Save size" onPress={() => saveAreaEdit(r)} testID={`save-room-size-${i}`} />
+                  {r.manualSqft ? (
+                    <Button small kind="secondary" label="Use estimate" onPress={() => useEstimatedArea(r)} testID={`use-estimate-${i}`} />
+                  ) : (
+                    <Button small kind="ghost" label="Cancel" onPress={() => (setEditingRoomId(null), setAreaText(""))} testID={`cancel-room-size-${i}`} />
+                  )}
+                </View>
+              </View>
+            ) : null}
+          </View>
         );
       })}
     </WizardScaffold>
@@ -236,14 +252,18 @@ export default function DimensionsStep() {
 }
 
 const useStyles = makeStyles((c) => ({
-  badge: { alignSelf: "flex-start", fontFamily: fonts.text, fontSize: 13, fontWeight: "600", color: c.onSurface, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, overflow: "hidden" },
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   chips: { gap: spacing.sm },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   h: { fontFamily: fonts.text, fontSize: 16, fontWeight: "700", color: c.onSurface },
   p: { fontFamily: fonts.text, fontSize: 13, lineHeight: 19, color: c.muted },
+  k: { fontFamily: fonts.text, fontSize: 12, fontWeight: "600", color: c.muted },
+  meta: { fontFamily: fonts.text, fontSize: 11, lineHeight: 16, color: c.muted },
   name: { fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface },
   input: { height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, paddingHorizontal: spacing.md, fontFamily: fonts.text, fontSize: 16, color: c.onSurface },
-  roomRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1.5, borderColor: c.border, backgroundColor: c.surfaceSecondary },
+  roomCard: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1.5, borderColor: c.border, backgroundColor: c.surfaceSecondary },
+  roomSummary: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  roomSelect: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.md },
+  sizeEditor: { gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: c.border },
   dot: { width: 16, height: 16, borderRadius: 8 },
 }));
