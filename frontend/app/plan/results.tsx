@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Platform, Share, Text, View } from "react-native";
 
+import { CombinedPlan } from "@/src/components/CombinedPlan";
 import { BudgetBar } from "@/src/components/BudgetBar";
 import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { ProductSheet } from "@/src/components/ProductSheet";
@@ -16,11 +17,12 @@ import { fonts, makeStyles, radius, spacing } from "@/src/theme";
 
 export default function ResultsStep() {
   const router = useRouter();
-  const { state, geom, reset } = usePlan();
+  const { state, geom, reset, nextRoom } = usePlan();
   const s = useStyles();
   const [uid, setUid] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const plan = state.plan;
+<<<<<<< Updated upstream
   const v = plan && geom ? validatePlan(state, plan) : null;
   const products = (plan ?? []).map((i) => getProduct(i.productId));
 
@@ -29,6 +31,24 @@ export default function ResultsStep() {
     const rows = [["Category", "Name", "Width (cm)", "Depth (cm)", "Height (cm)", "Price (USD)", "Retailer", "Link"]];
     products.forEach((p) => rows.push([CATEGORY_MAP[p.category].label, p.name, String(p.width), String(p.depth), String(p.height), String(p.price), p.retailer, p.url ?? "Not verified (demo)"]));
     rows.push(["", "TOTAL", "", "", "", String(v?.total ?? 0), "", ""], ["", "BUDGET", "", "", "", String(totalBudget(state)), "", ""]);
+=======
+  const v = plan && geom ? validateLayout(geom, plan, state.budget) : null;
+  const hasNext = state.selectedRoomIds.indexOf(state.selectedRoomId ?? "") < state.selectedRoomIds.length - 1;
+  const allComplete = !!plan && state.selectedRoomIds.every(id => id === state.selectedRoomId || !!state.roomProgress[id]?.plan);
+  const final = !hasNext && allComplete;
+  const resultRooms = final ? state.selectedRoomIds : [state.selectedRoomId!];
+  const entries = resultRooms.flatMap(id => (id === state.selectedRoomId ? plan ?? [] : state.roomProgress[id]?.plan ?? []).map(item => ({ item, room: state.apartment.rooms.find(r => r.id === id)?.label ?? id })));
+  const resultItems = entries.map(e => e.item);
+  const products = resultItems.map(i => getProduct(i.productId));
+  const total = products.reduce((sum, p) => sum + p.price, 0);
+  const budget = resultRooms.reduce((sum, id) => sum + (id === state.selectedRoomId ? state.budget : state.roomProgress[id]?.budget ?? 0), 0);
+
+  const csv = () => {
+    const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
+    const rows = [["Room", "Category", "Name", "Width (cm)", "Depth (cm)", "Height (cm)", "Price (USD)", "Retailer", "Link"]];
+    products.forEach((p, i) => rows.push([entries[i].room, CATEGORY_MAP[p.category].label, p.name, String(p.width), String(p.depth), String(p.height), String(p.price), p.retailer, p.url ?? "Not verified (demo)"]));
+    rows.push(["", "", "TOTAL", "", "", "", String(total), "", ""], ["", "", "BUDGET", "", "", "", String(budget), "", ""]);
+>>>>>>> Stashed changes
     return rows.map((r) => r.map(esc).join(",")).join("\n");
   };
   const download = async () => {
@@ -46,7 +66,11 @@ export default function ResultsStep() {
   };
   const print = async () => {
     if (Platform.OS === "web") window.print();
+<<<<<<< Updated upstream
     else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(v?.total ?? 0)} of ${money(totalBudget(state))}` });
+=======
+    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(total)} of ${money(budget)}` });
+>>>>>>> Stashed changes
   };
 
   if (!plan || !v || !geom) {
@@ -59,18 +83,30 @@ export default function ResultsStep() {
   }
 
   return (
+<<<<<<< Updated upstream
     <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={state.selectedRoomIds.length > 1 ? `${state.selectedRoomIds.length} furnished rooms` : `${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`}>
       <Card style={{ gap: spacing.sm }}>
         <ConfiguredPlan items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />
+=======
+    <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={`${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`} cta={hasNext ? { label: "Next Room", testID: "next-room-button", onPress: () => { nextRoom(); setUid(null); setMsg(null); router.push("/plan/furniture"); } } : undefined}>
+      <Card style={{ gap: spacing.sm }}>
+        {state.selectedRoomIds.length > 1 ? <CombinedPlan onPressItem={setUid} /> : <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />}
+>>>>>>> Stashed changes
         <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, walkways clear, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
         <Text style={s.h}>Budget summary</Text>
         <View style={s.stats}>
           {[
+<<<<<<< Updated upstream
             ["Budget", totalBudget(state), "summary-budget"],
             ["Furniture", v.total, "summary-total"],
             ["Remaining", totalBudget(state) - v.total, "summary-remaining"],
+=======
+            ["Budget", budget, "summary-budget"],
+            ["Furniture", total, "summary-total"],
+            ["Remaining", budget - total, "summary-remaining"],
+>>>>>>> Stashed changes
           ].map(([k, n, id]) => (
             <View key={k as string} style={s.stat}>
               <Text style={s.k}>{k}</Text>
@@ -80,11 +116,15 @@ export default function ResultsStep() {
             </View>
           ))}
         </View>
+<<<<<<< Updated upstream
         <BudgetBar total={v.total} budget={totalBudget(state)} />
+=======
+        <BudgetBar total={total} budget={budget} />
+>>>>>>> Stashed changes
       </Card>
       <Text style={s.h}>Shopping list</Text>
       {products.map((p, i) => (
-        <Card key={plan[i].uid} style={s.item} testID={`list-item-${plan[i].uid}`}>
+        <Card key={`${entries[i].room}-${resultItems[i].uid}`} style={s.item} testID={`list-item-${resultItems[i].uid}`}>
           <ProductSwatch category={p.category} style={p.styles[0]} size={56} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={s.name}>{p.name}</Text>
@@ -97,7 +137,7 @@ export default function ResultsStep() {
         </Card>
       ))}
       {msg ? <Notice tone="success" text={msg} testID="results-message" /> : null}
-      <View style={s.actions}>
+      {final ? <View style={s.actions}>
         <Button small label="Download CSV" icon="download" onPress={download} testID="download-csv-button" style={s.action} />
         <Button small kind="secondary" label="Print / Save" icon="printer" onPress={print} testID="print-button" style={s.action} />
         <Button small kind="secondary" label="Edit Furniture" icon="edit-3" onPress={() => router.push("/plan/furniture")} testID="edit-furniture-button" style={s.action} />
@@ -115,7 +155,7 @@ export default function ResultsStep() {
           testID="start-over-button"
           style={s.action}
         />
-      </View>
+      </View> : null}
       <ProductSheet uid={uid} onClose={() => setUid(null)} />
     </WizardScaffold>
   );

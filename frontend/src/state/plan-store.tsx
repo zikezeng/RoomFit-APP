@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { buildGeom, RoomGeom, sampleApartment } from "@/src/lib/apartment";
 import { CATEGORIES, FURNISHABLE, setCustomProducts } from "@/src/lib/catalog";
@@ -10,7 +10,11 @@ export type RoomConfig = Pick<PlanState, "needsKind" | "needs" | "customItems" |
 
 export interface PlanState {
   selectedRoomIds: string[];
+<<<<<<< Updated upstream
   roomConfigs: Record<string, RoomConfig>;
+=======
+  roomProgress: Record<string, RoomProgress>;
+>>>>>>> Stashed changes
   apartment: Apartment; // uploaded floor plan (reference image)
   room: RoomSpec; // confirmed room dimensions (Step 2)
   dimsConfirmed: boolean;
@@ -28,6 +32,33 @@ export interface PlanState {
   seed: number;
   selectedLayoutId: string | null;
   plan: PlacedItem[] | null;
+}
+
+export type RoomProgress = Pick<PlanState, "roomKind" | "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "layouts" | "seed" | "selectedLayoutId" | "plan">;
+export const roomRank = (kind: RoomKind) => kind === "living" ? 0 : kind === "bedroom" ? 1 : FURNISHABLE.includes(kind) ? 2 : 3;
+export function saveRoom(s: PlanState): PlanState {
+  if (!s.selectedRoomId) return s;
+  const { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan } = s;
+  return { ...s, roomProgress: { ...s.roomProgress, [s.selectedRoomId]: { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan } } };
+}
+export function activateRoom(state: PlanState, id: string): PlanState {
+  const s = saveRoom(state);
+  const room = s.apartment.rooms.find(r => r.id === id);
+  if (!room || !s.selectedRoomIds.includes(id)) return s;
+  const saved = s.roomProgress[id];
+  const defaults = initialState();
+  return saveRoom({ ...s, ...(saved?.roomKind === room.kind ? saved : {
+    roomKind: room.kind, needsKind: room.kind, needs: defaultNeeds(room.kind, s.apartment.homeType),
+    customItems: [], budget: defaults.budget, allocations: defaults.allocations,
+    layouts: null, seed: 0, selectedLayoutId: null, plan: null,
+  }), selectedRoomId: id });
+}
+export function toggleRoom(s: PlanState, id: string): PlanState {
+  const room = s.apartment.rooms.find(r => r.id === id);
+  if (!room || !FURNISHABLE.includes(room.kind)) return s;
+  const ids = new Set(s.selectedRoomIds);
+  if (ids.has(id)) ids.delete(id); else ids.add(id);
+  return { ...saveRoom(s), selectedRoomIds: [...s.apartment.rooms].sort((a,b) => roomRank(a.kind) - roomRank(b.kind)).filter(r => ids.has(r.id)).map(r => r.id) };
 }
 
 export const emptyApartment = (): Apartment => ({
@@ -66,7 +97,11 @@ export const SAMPLE_ROOM: RoomSpec = { width: 480, length: 360, door: { wall: "b
 
 export const initialState = (): PlanState => ({
   selectedRoomIds: [],
+<<<<<<< Updated upstream
   roomConfigs: {},
+=======
+  roomProgress: {},
+>>>>>>> Stashed changes
   apartment: emptyApartment(),
   room: emptyRoom(),
   dimsConfirmed: false,
@@ -130,7 +165,13 @@ interface Ctx {
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
   selectRoom: (id: string) => void;
+<<<<<<< Updated upstream
   toggleRoom: (id: string) => void;
+=======
+  startRooms: () => void;
+  nextRoom: () => void;
+  previousRoom: () => void;
+>>>>>>> Stashed changes
   generate: (seed: number) => void;
   selectLayout: (id: string) => void;
   swap: (uid: string, productId: string) => ReturnType<typeof trySwap> | null;
@@ -141,11 +182,19 @@ interface Ctx {
 const PlanContext = createContext<Ctx | null>(null);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<PlanState>(initialState);
+  const [state, setRawState] = useState<PlanState>(initialState);
+  const setState = useCallback((action: React.SetStateAction<PlanState>) => {
+    setRawState(previous => saveRoom(typeof action === "function" ? action(previous) : action));
+  }, []);
   const [ready, setReady] = useState(false);
   const stateRef = useRef(state);
+<<<<<<< Updated upstream
   stateRef.current = state;
   setCustomProducts([...Object.values(configsOf(state)).flatMap((c) => c.customItems)]);
+=======
+  useLayoutEffect(() => { stateRef.current = state; }, [state]);
+  setCustomProducts([...Object.values(state.roomProgress).flatMap(r => r.customItems), ...state.customItems]);
+>>>>>>> Stashed changes
 
   useEffect(() => {
     Promise.all([storage.getItem(KEY, null as string | null), storage.getItem(IMG_KEY, null as string | null)]).then(([raw, img]) => {
@@ -153,12 +202,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         try {
           const s = restoreState(JSON.parse(raw));
           s.apartment = { ...s.apartment, imageUri: img };
+          if (!("selectedRoomIds" in JSON.parse(raw))) s.selectedRoomIds = s.selectedRoomId ? [s.selectedRoomId] : [];
           setState(s);
         } catch {}
       }
       setReady(true);
     });
-  }, []);
+  }, [setState]);
 
   // Persist state; the (large) image is stored under its own key only when it changes.
   const lastImg = useRef<string | null | undefined>(undefined);
@@ -174,6 +224,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [state, ready]);
 
   const geom = useMemo(() => buildGeom(state.apartment, state.selectedRoomId), [state.apartment, state.selectedRoomId]);
+<<<<<<< Updated upstream
+=======
+  const geomRef = useRef(geom);
+  useLayoutEffect(() => { geomRef.current = geom; }, [geom]);
+>>>>>>> Stashed changes
 
   const update = useCallback((patch: Partial<PlanState>, invalidate: Invalidate = "none") => {
     setState((s) => {
@@ -186,20 +241,28 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (invalidate !== "none") n.plan = null;
       return n;
     });
-  }, []);
+  }, [setState]);
 
   /** Any change to the apartment geometry invalidates layouts and the furnished plan. */
   const setApartment = useCallback((fn: (a: Apartment) => Apartment) => {
     setState((s) => {
       const apartment = fn(s.apartment);
+<<<<<<< Updated upstream
       const ids = s.selectedRoomIds.filter((id) => apartment.rooms.some((r) => r.id === id && FURNISHABLE.includes(r.kind)));
       const active = ids.includes(s.selectedRoomId!) ? s.selectedRoomId : ids[0] ?? null;
       let next: PlanState = { ...s, apartment, selectedRoomIds: ids, layouts: null, selectedLayoutId: null, plan: null };
       for (const id of ids) next = activateRoom(next, id);
       return active ? activateRoom(next, active) : { ...next, selectedRoomId: null, roomKind: null };
+=======
+      const keepRoom = apartment.rooms.some((r) => r.id === s.selectedRoomId);
+      return { ...s, apartment, selectedRoomId: keepRoom ? s.selectedRoomId : null,
+        selectedRoomIds: s.selectedRoomIds.filter(id => apartment.rooms.some(r => r.id === id && FURNISHABLE.includes(r.kind))),
+        roomProgress: {}, layouts: null, selectedLayoutId: null, plan: null };
+>>>>>>> Stashed changes
     });
-  }, []);
+  }, [setState]);
 
+<<<<<<< Updated upstream
   const selectRoom = useCallback((id: string) => {
     setState((s) => s.selectedRoomIds.includes(id) ? activateRoom(s, id) : s);
   }, []);
@@ -213,6 +276,18 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       return active ? activateRoom(ids.includes(id) ? activateRoom(next, id) : next, active) : { ...next, selectedRoomId: null, roomKind: null };
     });
   }, []);
+=======
+  const selectRoom = useCallback((id: string) => setState(s => toggleRoom(s, id)), [setState]);
+  const startRooms = useCallback(() => setState(s => s.selectedRoomIds.length ? activateRoom(s, s.selectedRoomIds[0]) : s), [setState]);
+  const previousRoom = useCallback(() => setState(s => {
+    const previous = s.selectedRoomIds[s.selectedRoomIds.indexOf(s.selectedRoomId ?? "") - 1];
+    return previous ? activateRoom(s, previous) : s;
+  }), [setState]);
+  const nextRoom = useCallback(() => setState(s => {
+    const next = s.selectedRoomIds[s.selectedRoomIds.indexOf(s.selectedRoomId ?? "") + 1];
+    return s.plan && next ? activateRoom(s, next) : s;
+  }), [setState]);
+>>>>>>> Stashed changes
 
   const generate = useCallback((seed: number) => {
     const s = stateRef.current;
@@ -235,14 +310,14 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         problems: parts.flatMap((p, i) => p.problems.map((v) => `${label(i)}: ${v}`)), suggestions: parts.flatMap((p) => p.suggestions) };
     });
     setState((p) => ({ ...p, layouts, seed, selectedLayoutId: null }));
-  }, []);
+  }, [setState]);
 
   const selectLayout = useCallback((id: string) => {
     setState((s) => {
       const l = s.layouts?.find((x) => x.id === id);
       return l ? { ...s, selectedLayoutId: id, plan: l.items.map((i) => ({ ...i })) } : s;
     });
-  }, []);
+  }, [setState]);
 
   const swap = useCallback((uid: string, productId: string) => {
     const s = stateRef.current;
@@ -254,14 +329,19 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const r = trySwap(g, items, uid, productId, configsOf(s)[id!]?.budget ?? s.budget);
     if (r.valid) setState((p) => ({ ...p, plan: p.plan!.map((i) => r.items.find((x) => x.uid === i.uid) ?? i) }));
     return r;
-  }, []);
+  }, [setState]);
 
-  const reset = useCallback(() => setState(initialState()), []);
-  const loadDemo = useCallback(() => setState(demoState()), []);
+  const reset = useCallback(() => setState(initialState()), [setState]);
+  const loadDemo = useCallback(() => setState(demoState()), [setState]);
 
   const value = useMemo(
+<<<<<<< Updated upstream
     () => ({ state, ready, geom, update, setApartment, selectRoom, toggleRoom, generate, selectLayout, swap, reset, loadDemo }),
     [state, ready, geom, update, setApartment, selectRoom, toggleRoom, generate, selectLayout, swap, reset, loadDemo],
+=======
+    () => ({ state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, reset, loadDemo }),
+    [state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, reset, loadDemo],
+>>>>>>> Stashed changes
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

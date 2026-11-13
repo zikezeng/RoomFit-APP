@@ -16,9 +16,12 @@ export const roomColor = (c: ThemeColors, k: RoomKind) =>
 
 interface Props {
   ap: Apartment;
+<<<<<<< Updated upstream
   items?: PlacedItem[];
   selectedUid?: string | null;
   onPressItem?: (uid: string) => void;
+=======
+>>>>>>> Stashed changes
   selectedRoomIds?: string[];
   selectedRoomId?: string | null;
   edge?: { roomId: string; i: number } | null;
@@ -35,7 +38,11 @@ interface Props {
 }
 
 /** The user's actual floor plan image with an editable room-segmentation overlay (image px space). */
+<<<<<<< Updated upstream
 export function PlanCanvas({ ap, items = [], selectedUid, onPressItem, selectedRoomId, selectedRoomIds, edge, vertex, openingId, draft = [], dimRooms, onTap, onDragStart, onDrag, onDragEnd, testID }: Props) {
+=======
+export function PlanCanvas({ ap, selectedRoomId, selectedRoomIds, edge, vertex, openingId, draft = [], dimRooms, onTap, onDragStart, onDrag, onDragEnd, testID }: Props) {
+>>>>>>> Stashed changes
   const { colors } = useTheme();
   const [w, setW] = useState(0);
   const dragging = useRef(false);
@@ -64,7 +71,11 @@ export function PlanCanvas({ ap, items = [], selectedUid, onPressItem, selectedR
       {ap.imageUri ? <Image source={{ uri: ap.imageUri }} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} contentFit="fill" /> : null}
       <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", pointerEvents: onPressItem ? "auto" : "none" }}>
         {ap.rooms.map((r) => {
+<<<<<<< Updated upstream
           const sel = selectedRoomIds?.includes(r.id) ?? r.id === selectedRoomId;
+=======
+          const sel = r.id === selectedRoomId || !!selectedRoomIds?.includes(r.id);
+>>>>>>> Stashed changes
           const c = centroid(r.poly);
           const st = roomStats(ap, r);
           const faded = dimRooms?.(r.id);

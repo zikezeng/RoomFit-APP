@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/src/components/ui";
+import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export const STEPS = ["Upload", "Dimensions", "Room", "Furniture", "Style", "Budget", "Layouts", "Shop", "Plan"];
@@ -23,6 +24,8 @@ interface Props {
 }
 
 export function WizardScaffold({ step, title, subtitle, children, cta, secondary, header, scrollEnabled = true }: Props) {
+  const { state, previousRoom } = usePlan();
+  const currentRoom = state.apartment.rooms.find(r => r.id === state.selectedRoomId);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const s = useStyles();
@@ -31,7 +34,16 @@ export function WizardScaffold({ step, title, subtitle, children, cta, secondary
     <View style={s.root}>
       <View style={[s.top, { paddingTop: insets.top + spacing.sm }]}>
         <View style={s.topRow}>
-          <Pressable testID="wizard-back-button" onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} style={s.iconBtn} hitSlop={8}>
+          <Pressable testID="wizard-back-button" onPress={() => {
+            if (step === 4 && state.selectedRoomIds.indexOf(state.selectedRoomId ?? "") > 0) {
+              previousRoom();
+              router.navigate("/plan/results");
+            } else if (step >= 4 && step <= 9) {
+              const previous = ["/plan/rooms", "/plan/furniture", "/plan/style", "/plan/budget", "/plan/layouts", "/plan/shop"] as const;
+              router.navigate(previous[step - 4]);
+            } else if (router.canGoBack()) router.back();
+            else router.replace("/");
+          }} style={s.iconBtn} hitSlop={8}>
             <Feather name="arrow-left" size={20} color={colors.onSurface} />
           </Pressable>
           <Text testID="wizard-step-indicator" style={s.stepText}>
@@ -46,6 +58,7 @@ export function WizardScaffold({ step, title, subtitle, children, cta, secondary
             <View key={i} style={[s.seg, i < step && s.segOn]} />
           ))}
         </View>
+        {step >= 4 && step <= 9 && currentRoom ? <Text style={s.stepText} testID="room-progress-label">Room {state.selectedRoomIds.indexOf(currentRoom.id) + 1} of {state.selectedRoomIds.length} — {currentRoom.label}</Text> : null}
         {header}
       </View>
       <ScrollView scrollEnabled={scrollEnabled} contentContainerStyle={[s.content, { paddingBottom: (cta ? 120 : spacing.xl) + insets.bottom }]} keyboardShouldPersistTaps="handled">

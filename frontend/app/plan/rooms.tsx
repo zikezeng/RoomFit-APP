@@ -4,32 +4,38 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { PlanCanvas, roomColor } from "@/src/components/PlanCanvas";
-import { Notice } from "@/src/components/ui";
+
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { KIND_LABEL, pointInPoly, roomStats } from "@/src/lib/apartment";
+import { KIND_LABEL, buildGeom, pointInPoly, roomStats } from "@/src/lib/apartment";
 import { FURNISHABLE } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
-import { usePlan } from "@/src/state/plan-store";
+import { roomRank, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
   const router = useRouter();
+<<<<<<< Updated upstream
   const { state, geom, toggleRoom } = usePlan();
+=======
+  const { state, selectRoom, startRooms } = usePlan();
+>>>>>>> Stashed changes
   const s = useStyles();
   const { colors } = useTheme();
   const ap = state.apartment;
-  const sel = ap.rooms.find((r) => r.id === state.selectedRoomId);
-  const supported = !!sel && FURNISHABLE.includes(sel.kind);
-  // Furnishable rooms first (living, then bedrooms), then the rest.
-  const rank = (k: string) => (k === "living" ? 0 : k === "bedroom" ? 1 : FURNISHABLE.includes(k as never) ? 2 : 3);
-  const rooms = [...ap.rooms].sort((a, b) => rank(a.kind) - rank(b.kind));
+  const rooms = [...ap.rooms].sort((a, b) => roomRank(a.kind) - roomRank(b.kind));
+  const canContinue = state.selectedRoomIds.length > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
 
   return (
     <WizardScaffold
       step={3}
       title="Which Rooms Would You Like to Furnish?"
+<<<<<<< Updated upstream
       subtitle="Tap rooms on your plan or select their cards. Each room type gets its own furniture list, and every piece stays inside that room's real walls."
       cta={{ label: state.selectedRoomIds.length ? `Furnish ${state.selectedRoomIds.length} room${state.selectedRoomIds.length === 1 ? "" : "s"}` : "Select a room", disabled: !state.selectedRoomIds.length || !geom, onPress: () => router.push("/plan/furniture"), testID: "rooms-continue-button" }}
+=======
+      subtitle="Select rooms on your plan or below. Furnish each selected room one at a time."
+      cta={{ label: `Furnish ${state.selectedRoomIds.length} rooms`, disabled: !canContinue, onPress: () => { startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
+>>>>>>> Stashed changes
     >
       <PlanCanvas
         ap={ap}
@@ -41,13 +47,16 @@ export default function RoomsStep() {
         }}
         testID="rooms-canvas"
       />
-      {sel && !supported ? <Notice tone="warning" text={`${sel.label} is identified, but bathrooms and unlabelled areas are not furnished automatically. Choose another room, or set its type in Step 2.`} testID="room-unsupported-notice" /> : null}
       {rooms.map((r) => {
         const st = roomStats(ap, r);
         const ok = FURNISHABLE.includes(r.kind);
         const on = state.selectedRoomIds.includes(r.id);
         return (
+<<<<<<< Updated upstream
           <Pressable key={r.id} testID={`select-room-${r.kind}-${r.id}`} disabled={!ok} accessibilityRole="checkbox" accessibilityState={{ checked: on, disabled: !ok }} onPress={() => toggleRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
+=======
+          <Pressable key={r.id} disabled={!ok} accessibilityState={{ disabled: !ok, selected: on }} testID={`select-room-${r.kind}-${r.id}`} onPress={() => selectRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
+>>>>>>> Stashed changes
             <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{r.label}</Text>
