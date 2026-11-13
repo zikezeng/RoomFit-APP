@@ -3,7 +3,7 @@ import React, { useRef, useState } from "react";
 import { GestureResponderEvent, View } from "react-native";
 import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text as SvgText } from "react-native-svg";
 
-import { bbox, buildGeom, centroid, roomStats, scaleOf } from "@/src/lib/apartment";
+import { bbox, buildGeom, centroid, roomScale, roomStats } from "@/src/lib/apartment";
 import { getProduct } from "@/src/lib/catalog";
 import { footprint } from "@/src/lib/solver";
 import { catFill } from "@/src/components/FloorPlan";
@@ -106,7 +106,7 @@ export function PlanCanvas({ ap, items = [], selectedUid, onPressItem, selectedR
         {[...items].sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug")).map((item) => {
           const room = ap.rooms.find((r) => r.id === (item.roomId ?? selectedRoomId));
           const g = room && buildGeom(ap, room.id);
-          const scale = scaleOf(ap);
+          const scale = room && roomScale(ap, room);
           if (!room || !g || !scale) return null;
           const b = bbox(room.poly);
           const product = getProduct(item.productId);

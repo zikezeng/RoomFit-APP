@@ -16,7 +16,7 @@ for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (mod, file) => {
 const storageFile = path.join(root, 'src/utils/storage/index.ts');
 require.cache[storageFile] = { exports: { storage: {} } };
 const { initialState, demoState, saveRoom, activateRoom, toggleRoom, advanceRoom, restoreState } = require('../src/state/plan-store.tsx');
-const { buildGeom } = require('../src/lib/apartment.ts');
+const { buildGeom, roomStats, SQFT_CM2 } = require('../src/lib/apartment.ts');
 const { generateLayouts, validateLayout } = require('../src/lib/solver.ts');
 let s = saveRoom(demoState());
 const bedroom = s.apartment.rooms.find(r => r.kind === 'bedroom');
@@ -67,6 +67,25 @@ assert.equal(advanceRoom(unfinished, 1), unfinished);
 assert.deepEqual(advanceRoom(activateRoom(s, bedroom.id), -1).plan, livingPlan);
 assert.equal(advanceRoom(activateRoom(s, bedroom.id), 1).selectedRoomId, bedroom.id);
 console.log('PASS: real Next/Back transitions, room boundary guards, reload, and single-room migration.');
+// Main's manual room areas must drive each room's solver geometry independently.
+const manualAreas = { [living]: 300, [bedroom.id]: 180 };
+const sizedApartment = { ...s.apartment, rooms: s.apartment.rooms.map(room => ({ ...room, manualSqft: manualAreas[room.id] ?? null })) };
+for (const id of [living, bedroom.id]) {
+  const room = sizedApartment.rooms.find(room => room.id === id);
+  const stats = roomStats(sizedApartment, room);
+  const geometry = buildGeom(sizedApartment, id);
+  const expectedArea = manualAreas[id] * SQFT_CM2;
+  assert.ok(Math.abs(stats.area - expectedArea) < 0.001);
+  assert.ok(Math.abs(geometry.area - expectedArea) < 0.001);
+  const config = s.roomProgress[id];
+  const generated = generateLayouts({ geom: geometry, needs: config.needs, customItems: config.customItems, prefs: { styles: s.styles, moods: s.moods }, budget: config.budget, allocations: config.allocations, seed: 0 });
+  const valid = generated.find(layout => layout.valid);
+  assert.ok(valid, 'Expected furniture to fit confirmed room area: ' + id);
+  assert.ok(validateLayout(geometry, valid.items, config.budget).valid);
+}
+const originalOther = s.apartment.rooms.find(room => !manualAreas[room.id]);
+assert.deepEqual(buildGeom(sizedApartment, originalOther.id), buildGeom(s.apartment, originalOther.id));
+console.log('PASS: independent manual square footage drives room statistics and valid solver layouts without resizing other rooms.');
 // Render Step 9 with lightweight native-view adapters to check actions and CSV contents.
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');

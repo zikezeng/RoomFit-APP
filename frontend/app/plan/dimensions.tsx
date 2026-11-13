@@ -138,7 +138,7 @@ export default function DimensionsStep() {
     setErr(null);
   };
 
-  const useEstimatedArea = (r: Apartment["rooms"][number]) => {
+  const resetEstimatedArea = (r: Apartment["rooms"][number]) => {
     editRoom(r.id, { manualSqft: null });
     setEditingRoomId(null);
     setAreaText("");
@@ -237,7 +237,7 @@ export default function DimensionsStep() {
                 <View style={s.row}>
                   <Button small label="Save size" onPress={() => saveAreaEdit(r)} testID={`save-room-size-${i}`} />
                   {r.manualSqft ? (
-                    <Button small kind="secondary" label="Use estimate" onPress={() => useEstimatedArea(r)} testID={`use-estimate-${i}`} />
+                    <Button small kind="secondary" label="Use estimate" onPress={() => resetEstimatedArea(r)} testID={`use-estimate-${i}`} />
                   ) : (
                     <Button small kind="ghost" label="Cancel" onPress={() => (setEditingRoomId(null), setAreaText(""))} testID={`cancel-room-size-${i}`} />
                   )}
