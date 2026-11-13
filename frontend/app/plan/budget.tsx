@@ -4,12 +4,11 @@ import React, { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
 import { Card, Notice, money } from "@/src/components/ui";
-import { RoomTabs } from "@/src/components/RoomTabs";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORIES } from "@/src/lib/catalog";
 import { typicalCost } from "@/src/lib/ranking";
 import { perUnitAllocation } from "@/src/lib/solver";
-import { configsOf, itemCount, usePlan } from "@/src/state/plan-store";
+import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const MIN = 300;
@@ -87,11 +86,7 @@ function RoomBudget() {
     update({ allocations: { ...state.allocations, [id]: nextWeight } }, "layouts");
   };
 
-  const configs = configsOf(state);
-  const missingBudget = state.selectedRoomIds.some((id) => {
-    const c = configs[id];
-    return !c || itemCount(c) === 0 || c.budget <= c.customItems.reduce((sum, p) => sum + p.price, 0);
-  });
+  const missingBudget = state.customItems.length + selected.reduce((sum, c) => sum + state.needs[c.id]!.qty, 0) === 0 || state.budget <= customTotal;
 
   return (
     <WizardScaffold
@@ -106,7 +101,7 @@ function RoomBudget() {
         testID: "budget-continue-button",
       }}
     >
-      <RoomTabs />
+
       <Card style={{ gap: spacing.md }}>
         <Text style={s.k}>{state.apartment.rooms.find((r) => r.id === state.selectedRoomId)?.label} budget</Text>
         <View style={s.amountRow}>

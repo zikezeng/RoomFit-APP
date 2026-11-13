@@ -4,12 +4,11 @@ import { Pressable, Text, TextInput, View } from "react-native";
 
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, Stepper, money } from "@/src/components/ui";
-import { RoomTabs } from "@/src/components/RoomTabs";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { KIND_LABEL, uid } from "@/src/lib/apartment";
 import { CATEGORIES, categoriesFor } from "@/src/lib/catalog";
 import { CategoryId, Need, Product, RoomKind } from "@/src/lib/types";
-import { configsOf, itemCount, usePlan } from "@/src/state/plan-store";
+import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 // Keep Step 4's recommendations local to this page.
@@ -124,9 +123,6 @@ function FurnitureRoom() {
     selected.reduce((a, c) => a + needs[c.id]!.qty, 0) +
     state.customItems.length;
 
-  const configs = configsOf(state);
-  const totalCount = state.selectedRoomIds.reduce((sum, id) => sum + (configs[id] ? itemCount(configs[id]) : 0), 0);
-  const missingFurniture = state.selectedRoomIds.some((id) => !configs[id] || itemCount(configs[id]) === 0);
 
   const addCustom = () => {
     if (!room) {
@@ -260,14 +256,13 @@ function FurnitureRoom() {
       title="What Does Your Room Need?"
       subtitle={`${room?.label ?? "Room"} (${KIND_LABEL[kind]}) · tap to add or remove. You don't need everything.`}
       cta={{
-        label: `Continue with ${totalCount} items`,
-        disabled: !ready || !room || missingFurniture,
+        label: `Continue with ${count} items`,
+        disabled: !ready || !room || count === 0,
         onPress: () => router.push("/plan/style"),
         testID: "furniture-continue-button",
       }}
     >
-      <RoomTabs />
-      {missingFurniture && state.selectedRoomIds.length > 1 ? <Notice text="Choose furniture for each selected room before continuing. Use the room tabs to configure each room." /> : null}
+
       {!room ? (
         <Notice
           tone="warning"

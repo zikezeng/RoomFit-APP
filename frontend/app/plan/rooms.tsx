@@ -14,11 +14,7 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
   const router = useRouter();
-<<<<<<< Updated upstream
-  const { state, geom, toggleRoom } = usePlan();
-=======
   const { state, selectRoom, startRooms } = usePlan();
->>>>>>> Stashed changes
   const s = useStyles();
   const { colors } = useTheme();
   const ap = state.apartment;
@@ -29,13 +25,8 @@ export default function RoomsStep() {
     <WizardScaffold
       step={3}
       title="Which Rooms Would You Like to Furnish?"
-<<<<<<< Updated upstream
-      subtitle="Tap rooms on your plan or select their cards. Each room type gets its own furniture list, and every piece stays inside that room's real walls."
-      cta={{ label: state.selectedRoomIds.length ? `Furnish ${state.selectedRoomIds.length} room${state.selectedRoomIds.length === 1 ? "" : "s"}` : "Select a room", disabled: !state.selectedRoomIds.length || !geom, onPress: () => router.push("/plan/furniture"), testID: "rooms-continue-button" }}
-=======
       subtitle="Select rooms on your plan or below. Furnish each selected room one at a time."
       cta={{ label: `Furnish ${state.selectedRoomIds.length} rooms`, disabled: !canContinue, onPress: () => { startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
->>>>>>> Stashed changes
     >
       <PlanCanvas
         ap={ap}
@@ -43,7 +34,7 @@ export default function RoomsStep() {
         dimRooms={(id) => !FURNISHABLE.includes(ap.rooms.find((r) => r.id === id)!.kind)}
         onTap={(p) => {
           const hit = ap.rooms.find((r) => pointInPoly(p, r.poly));
-          if (hit) toggleRoom(hit.id);
+          if (hit) selectRoom(hit.id);
         }}
         testID="rooms-canvas"
       />
@@ -52,11 +43,7 @@ export default function RoomsStep() {
         const ok = FURNISHABLE.includes(r.kind);
         const on = state.selectedRoomIds.includes(r.id);
         return (
-<<<<<<< Updated upstream
-          <Pressable key={r.id} testID={`select-room-${r.kind}-${r.id}`} disabled={!ok} accessibilityRole="checkbox" accessibilityState={{ checked: on, disabled: !ok }} onPress={() => toggleRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
-=======
           <Pressable key={r.id} disabled={!ok} accessibilityState={{ disabled: !ok, selected: on }} testID={`select-room-${r.kind}-${r.id}`} onPress={() => selectRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
->>>>>>> Stashed changes
             <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{r.label}</Text>

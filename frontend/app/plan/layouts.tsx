@@ -1,5 +1,5 @@
 import Feather from "@react-native-vector-icons/feather";
-import { useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
@@ -12,6 +12,7 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function LayoutsStep() {
   const router = useRouter();
+  const pathname = usePathname();
   const { state, geom, generate, selectLayout } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
@@ -25,9 +26,10 @@ export default function LayoutsStep() {
     }, 450);
   };
   useEffect(() => {
-    if (!state.layouts && geom) run(state.seed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.layouts]);
+    if (pathname !== "/plan/layouts" || state.layouts || !geom) return;
+    const timer = setTimeout(() => { generate(state.seed); setBusy(false); }, 450);
+    return () => clearTimeout(timer);
+  }, [state.layouts, pathname, geom, state.seed, generate]);
 
   const layouts = state.layouts ?? [];
   const validCount = layouts.filter((l) => l.valid).length;
@@ -36,7 +38,7 @@ export default function LayoutsStep() {
     <WizardScaffold
       step={7}
       title="Your Personalized Room Designs"
-      subtitle={`Computed by a deterministic constraint solver inside the real outline of ${state.selectedRoomIds.length > 1 ? "your selected rooms" : geom?.label ?? "your room"} — walls, doors, windows, fixed fixtures, furniture and budget.`}
+      subtitle={`Computed by a deterministic constraint solver inside the real outline of ${geom?.label ?? "your room"} — walls, doors, windows, fixed fixtures, furniture and budget.`}
       cta={{ label: "Shop this layout", icon: "shopping-bag", disabled: !state.selectedLayoutId, onPress: () => router.push("/plan/shop"), testID: "layouts-continue-button" }}
       secondary={{ label: "Regenerate", onPress: () => run(state.seed + 1), testID: "regenerate-layouts-button" }}
     >

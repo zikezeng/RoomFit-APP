@@ -5,7 +5,7 @@ import { configsOf, PlanState } from "../state/plan-store";
 
 export function validatePlan(state: PlanState, items: PlacedItem[]) {
   const configs = configsOf(state);
-  const parts = state.selectedRoomIds.map((id) => {
+  const parts = [state.selectedRoomId].filter((id): id is string => !!id).map((id) => {
     const g = buildGeom(state.apartment, id);
     const local = items.filter((i) => (i.roomId ?? state.selectedRoomId) === id);
     if (!g) return { valid: false, total: 0, checks: [{ id, label: "Room geometry", ok: false, detail: "Room geometry is missing." }] };
