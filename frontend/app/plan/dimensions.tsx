@@ -1,26 +1,33 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { PlanCanvas, roomColor } from "@/src/components/PlanCanvas";
 import { Button, Card, Chip, Notice } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { KIND_LABEL, ROOM_KINDS, SQFT_CM2, dist, distToSeg, estimateScale, homeTypeWarnings, pointInPoly, roomStats, scaleOf, uid } from "@/src/lib/apartment";
+import { KIND_LABEL, ROOM_KINDS, SQFT_CM2, dist, distToSeg, estimateScale, pointInPoly, roomStats, uid } from "@/src/lib/apartment";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
 import { Apartment, Pt } from "@/src/lib/types";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-type Mode = "select" | "draw" | "corners" | "door";
-const MODES: { id: Mode; label: string; hint: string }[] = [
-  { id: "select", label: "Select room", hint: "Tap a room to select it, then confirm or correct its type and size below." },
-  { id: "draw", label: "Add room", hint: "Tap “Add rectangle” for a quick box you can then reshape, or tap each corner of a missing room in order and press Finish room." },
-  { id: "corners", label: "Edit corners", hint: "Drag any corner to move it. Tap on a wall line to add a corner; tap a corner and press Delete corner to remove it." },
-  { id: "door", label: "Mark door", hint: "Tap both ends of a door opening so furniture never blocks it." },
+type Mode = "select" | "corners" | "door";
+const MODES: { id: Mode; label: string }[] = [
+  { id: "select", label: "Select room" },
+  { id: "corners", label: "Edit corners" },
+  { id: "door", label: "Mark door (required)" },
 ];
+
+function isRoomDoor(rooms: Apartment["rooms"], a: Pt, b: Pt, tolerance: number) {
+  return dist(a, b) > 0 && rooms.some(({ poly }) => poly.some((start, i) => {
+    const end = poly[(i + 1) % poly.length];
+    return distToSeg(a, start, end) <= tolerance && distToSeg(b, start, end) <= tolerance;
+  }));
+}
 
 export default function DimensionsStep() {
   const router = useRouter();
+  const { stage } = useLocalSearchParams<{ stage?: string }>();
   const { state, setApartment } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
@@ -31,12 +38,16 @@ export default function DimensionsStep() {
   const [draft, setDraft] = useState<Pt[]>([]);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [areaText, setAreaText] = useState("");
+  const [confirmedSizes, setConfirmedSizes] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragV = useRef<{ roomId: string; i: number } | null>(null);
   const room = ap.rooms.find((r) => r.id === roomId);
-  const scale = scaleOf(ap);
-  const warnings = homeTypeWarnings(ap);
+  const doorMarked = ap.openings.some((opening) =>
+    opening.type === "door" && isRoomDoor(ap.rooms, opening.a, opening.b, 12),
+  );
+  const roomsReady = ap.rooms.length > 0 && doorMarked;
+  const reviewingSizes = stage === "sizes" && roomsReady;
 
   // Room edits keep the apartment-size scale estimate in sync.
   const setRooms = (fn: (r: Apartment["rooms"]) => Apartment["rooms"]) =>
@@ -48,10 +59,16 @@ export default function DimensionsStep() {
 
   const onTap = (p: Pt, tol: number) => {
     setErr(null);
-    if (mode === "draw") return setDraft((d) => [...d, p]);
     if (mode === "door") {
-      if (!draft.length) return setDraft([p]);
+      const tolerance = Math.min(tol, 12);
+      if (!draft.length) {
+        if (!ap.rooms.some(({ poly }) => poly.some((start, i) => distToSeg(p, start, poly[(i + 1) % poly.length]) <= tolerance))) {
+          return setErr("Tap the first end of a door along a room wall.");
+        }
+        return setDraft([p]);
+      }
       const a = draft[0];
+      if (!isRoomDoor(ap.rooms, a, p, tolerance)) return setErr("Tap the other end of the door on the same wall.");
       setDraft([]);
       return setApartment((x) => ({ ...x, openings: [...x.openings, { id: uid(), type: "door", a, b: p }] }));
     }
@@ -97,26 +114,7 @@ export default function DimensionsStep() {
     editRoom(room.id, { poly: room.poly.filter((_, i) => i !== vertex.i) });
     setVertex(null);
   };
-  const addRect = () => {
-    const w = ap.imgW * 0.25;
-    const h = ap.imgH * 0.25;
-    const x0 = ap.imgW / 2 - w / 2;
-    const y0 = ap.imgH / 2 - h / 2;
-    const id = uid();
-    setRooms((rs) => [...rs, { id, kind: "other", label: `Room ${rs.length + 1}`, poly: [{ x: x0, y: y0 }, { x: x0 + w, y: y0 }, { x: x0 + w, y: y0 + h }, { x: x0, y: y0 + h }] }]);
-    setDraft([]);
-    setRoomId(id);
-    setMode("corners");
-  };
-
-  const finishRoom = () => {
-    if (draft.length < 3) return setErr("A room needs at least 3 corners.");
-    const id = uid();
-    setRooms((rs) => [...rs, { id, kind: "other", label: `Room ${rs.length + 1}`, poly: draft }]);
-    setDraft([]);
-    setRoomId(id);
-    setMode("select");
-  };
+  const confirmSize = (id: string) => setConfirmedSizes((ids) => new Set(ids).add(id));
 
   const beginAreaEdit = (r: Apartment["rooms"][number]) => {
     const st = roomStats(ap, r);
@@ -127,12 +125,13 @@ export default function DimensionsStep() {
   };
 
   const saveAreaEdit = (r: Apartment["rooms"][number]) => {
-    const sqft = parseFloat(areaText.replace(",", "."));
+    const sqft = Number(areaText.replace(",", "."));
     if (!isFinite(sqft) || sqft < 10 || sqft > 10000) {
       setErr("Enter a realistic room size between 10 and 10,000 sq ft.");
       return;
     }
     editRoom(r.id, { manualSqft: sqft });
+    confirmSize(r.id);
     setEditingRoomId(null);
     setAreaText("");
     setErr(null);
@@ -140,6 +139,11 @@ export default function DimensionsStep() {
 
   const resetEstimatedArea = (r: Apartment["rooms"][number]) => {
     editRoom(r.id, { manualSqft: null });
+    setConfirmedSizes((ids) => {
+      const next = new Set(ids);
+      next.delete(r.id);
+      return next;
+    });
     setEditingRoomId(null);
     setAreaText("");
     setErr(null);
@@ -148,76 +152,95 @@ export default function DimensionsStep() {
   return (
     <WizardScaffold
       step={2}
-      title="Confirm Your Space"
-      subtitle="We estimated each room from your floor plan. Review the results and edit any room if you know the exact size."
-      cta={{ label: "Confirm rooms", disabled: !scale || ap.rooms.length === 0, onPress: () => router.push("/plan/rooms"), testID: "confirm-dimensions-button" }}
+      title={reviewingSizes ? "2. Confirm Room Sizes" : "1. Confirm Your Rooms"}
+      cta={reviewingSizes ? {
+        label: "Confirm room sizes",
+        disabled: !!editingRoomId || ap.rooms.some((r) => !roomStats(ap, r) || !confirmedSizes.has(r.id)),
+        onPress: () => router.push("/plan/rooms"),
+        testID: "confirm-room-sizes-button",
+      } : {
+        label: doorMarked ? "Confirm rooms" : "Mark a door to continue",
+        disabled: !roomsReady || draft.length > 0,
+        onPress: () => router.push({ pathname: "/plan/dimensions", params: { stage: "sizes" } }),
+        testID: "confirm-dimensions-button",
+      }}
       scrollEnabled={!dragging}
     >
-      {!ap.source ? <Notice tone="warning" text="No floor plan yet — go back to Step 1." /> : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
-        {MODES.map((m) => (
-          <Chip key={m.id} label={m.label} selected={mode === m.id} onPress={() => (setMode(m.id), setDraft([]), setVertex(null))} testID={`mode-${m.id}`} />
-        ))}
-      </ScrollView>
-      <Text style={s.p}>{MODES.find((m) => m.id === mode)!.hint}</Text>
-      <PlanCanvas ap={ap} selectedRoomId={roomId} vertex={vertex} draft={draft} onTap={onTap} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={() => ((dragV.current = null), setDragging(false))} testID="editor-canvas" />
-      {mode === "draw" && !draft.length ? <Button small icon="square" label="Add rectangle" onPress={addRect} testID="add-rect-room-button" /> : null}
-      {mode === "corners" && room && vertex?.roomId === room.id ? (
-        <View style={s.row}>
-          <Text style={[s.p, { flex: 1 }]} testID="selected-corner-text">Corner {vertex.i + 1} of {room.poly.length} selected</Text>
-          <Button small kind="secondary" icon="x-circle" label="Delete corner" onPress={deleteCorner} testID="delete-corner-button" />
-        </View>
-      ) : null}
-      {draft.length ? (
-        <View style={s.row}>
-          {mode === "draw" ? <Button small label={`Finish room (${draft.length})`} onPress={finishRoom} testID="finish-room-button" style={{ flex: 1 }} /> : null}
-          <Button small kind="secondary" label="Undo" onPress={() => setDraft((d) => d.slice(0, -1))} testID="undo-point-button" />
-          <Button small kind="ghost" label="Cancel" onPress={() => setDraft([])} testID="cancel-draft-button" />
-        </View>
-      ) : null}
-      {err ? <Notice tone="error" text={err} testID="editor-error" /> : null}
-      {warnings.map((w) => (
-        <Notice key={w} tone="warning" text={w} testID="home-type-warning" />
-      ))}
-
-      {room ? (
-        <Card style={{ gap: spacing.md }} testID="room-editor-card">
-          <Text style={s.h}>Selected: what is this room?</Text>
-          <View style={s.wrap}>
-            {ROOM_KINDS.map((k) => (
-              <Chip key={k.id} label={k.label} selected={room.kind === k.id} onPress={() => editRoom(room.id, { kind: k.id, label: k.label })} testID={`room-kind-${k.id}`} />
+      {!reviewingSizes ? (
+        <>
+          {!ap.rooms.length ? <Notice tone="warning" text="Go back and upload a floor plan with detectable rooms." /> : null}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
+            {MODES.map((m) => (
+              <Chip key={m.id} label={m.label} selected={mode === m.id} onPress={() => (setMode(m.id), setDraft([]), setVertex(null), setErr(null))} testID={`mode-${m.id}`} />
             ))}
-          </View>
-          <TextInput testID="room-label-input" style={s.input} value={room.label} onChangeText={(t) => editRoom(room.id, { label: t })} />
-          <Text style={s.p} testID="room-dims-text">
-            {(() => {
-              const st = roomStats(ap, room);
-              return st ? `${room.manualSqft ? "User-confirmed size" : "Estimated size"}: ${fmtLen(st.w, ap.unit)} × ${fmtLen(st.l, ap.unit)} · ${fmtAreaCm2(st.area, ap.unit)}` : "Uncalibrated";
-            })()}
-          </Text>
-          <Button small kind="secondary" icon="trash-2" label="Remove this area" onPress={() => (setRooms((rs) => rs.filter((r) => r.id !== room.id)), setRoomId(null))} testID="delete-room-button" />
-        </Card>
+          </ScrollView>
+          <PlanCanvas ap={ap} selectedRoomId={roomId} vertex={vertex} draft={draft} onTap={onTap} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={() => ((dragV.current = null), setDragging(false))} testID="editor-canvas" />
+          {mode === "door" ? (
+            <Text style={s.p}>{draft.length ? "Tap the other end of the door." : "Tap both ends of a door opening along a room wall."}</Text>
+          ) : null}
+          {mode === "corners" && room && vertex?.roomId === room.id ? (
+            <View style={s.row}>
+              <Text style={[s.p, { flex: 1 }]} testID="selected-corner-text">Corner {vertex.i + 1} of {room.poly.length} selected</Text>
+              <Button small kind="secondary" icon="x-circle" label="Delete corner" onPress={deleteCorner} testID="delete-corner-button" />
+            </View>
+          ) : null}
+          {draft.length ? (
+            <Button small kind="secondary" label="Undo door point" onPress={() => (setDraft([]), setErr(null))} testID="undo-point-button" />
+          ) : null}
+          {err ? <Notice tone="error" text={err} testID="editor-error" /> : null}
+          {room ? (
+            <Card style={{ gap: spacing.md }} testID="room-editor-card">
+              <Text style={s.h}>Selected: what is this room?</Text>
+              <View style={s.wrap}>
+                {ROOM_KINDS.map((k) => (
+                  <Chip key={k.id} label={k.label} selected={room.kind === k.id} onPress={() => editRoom(room.id, { kind: k.id, label: k.label })} testID={`room-kind-${k.id}`} />
+                ))}
+              </View>
+              <TextInput testID="room-label-input" style={s.input} value={room.label} onChangeText={(t) => editRoom(room.id, { label: t })} />
+              {ap.rooms.length > 1 ? (
+                <Button small kind="secondary" icon="trash-2" label="Remove this area" onPress={() => (setRooms((rs) => rs.filter((r) => r.id !== room.id)), setRoomId(null), setDraft([]), setVertex(null))} testID="delete-room-button" />
+              ) : null}
+            </Card>
+          ) : null}
+        </>
       ) : null}
 
       <Text style={s.h}>Rooms ({ap.rooms.length})</Text>
       {ap.rooms.map((r, i) => {
         const st = roomStats(ap, r);
-        const editing = editingRoomId === r.id;
+        const editing = reviewingSizes && editingRoomId === r.id;
+        const confirmed = confirmedSizes.has(r.id);
         return (
           <View key={r.id} style={[s.roomCard, roomId === r.id && { borderColor: colors.brandPrimary }]} testID={`room-row-${i}`}>
             <View style={s.roomSummary}>
-              <Pressable onPress={() => (setRoomId(r.id), setMode("select"))} style={s.roomSelect}>
+              <Pressable
+                disabled={reviewingSizes}
+                onPress={() => (setRoomId(r.id), setMode("select"), setDraft([]), setVertex(null), setErr(null))}
+                style={s.roomSelect}
+              >
                 <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.name}>{r.label}</Text>
-                  <Text style={s.p}>
-                    {KIND_LABEL[r.kind]} · {st ? fmtAreaCm2(st.area, ap.unit) : "Uncalibrated"}
-                  </Text>
-                  <Text style={s.meta}>{r.manualSqft ? "User confirmed" : "Estimated from floor plan"}</Text>
+                  <Text style={s.p}>{KIND_LABEL[r.kind]}</Text>
+                  {reviewingSizes ? (
+                    <>
+                      <Text style={s.p} testID={`room-dims-${i}`}>
+                        {st ? `${fmtLen(st.w, ap.unit)} × ${fmtLen(st.l, ap.unit)} · ${fmtAreaCm2(st.area, ap.unit)}` : "Size unavailable"}
+                      </Text>
+                      <Text style={s.meta}>{confirmed ? "Confirmed" : r.manualSqft ? "Saved size" : "Estimated from floor plan"}</Text>
+                    </>
+                  ) : null}
                 </View>
               </Pressable>
-              <Button small kind="secondary" label="Edit size" onPress={() => beginAreaEdit(r)} testID={`edit-room-size-${i}`} />
             </View>
+            {reviewingSizes && !editing ? (
+              <View style={s.row}>
+                {!confirmed && st ? (
+                  <Button small label="Confirm size" onPress={() => confirmSize(r.id)} testID={`confirm-room-size-${i}`} />
+                ) : null}
+                <Button small kind="secondary" label="Edit size" disabled={!!editingRoomId} onPress={() => beginAreaEdit(r)} testID={`edit-room-size-${i}`} />
+              </View>
+            ) : null}
 
             {editing ? (
               <View style={s.sizeEditor} testID={`room-size-editor-${i}`}>
@@ -227,20 +250,17 @@ export default function DimensionsStep() {
                   style={s.input}
                   keyboardType="decimal-pad"
                   value={areaText}
-                  onChangeText={(t) => setAreaText(t.replace(/[^0-9.]/g, ""))}
+                  onChangeText={(t) => setAreaText(t.replace(/[^0-9.,]/g, ""))}
                   placeholder="e.g. 180"
                   placeholderTextColor={colors.muted}
                 />
-                <Text style={s.meta}>
-                  If you know the exact area, enter it here. We’ll keep the detected room shape and recalculate its real-world dimensions.
-                </Text>
+                {err ? <Notice tone="error" text={err} testID="editor-error" /> : null}
                 <View style={s.row}>
                   <Button small label="Save size" onPress={() => saveAreaEdit(r)} testID={`save-room-size-${i}`} />
                   {r.manualSqft ? (
                     <Button small kind="secondary" label="Use estimate" onPress={() => resetEstimatedArea(r)} testID={`use-estimate-${i}`} />
-                  ) : (
-                    <Button small kind="ghost" label="Cancel" onPress={() => (setEditingRoomId(null), setAreaText(""))} testID={`cancel-room-size-${i}`} />
-                  )}
+                  ) : null}
+                  <Button small kind="ghost" label="Cancel" onPress={() => (setEditingRoomId(null), setAreaText(""), setErr(null))} testID={`cancel-room-size-${i}`} />
                 </View>
               </View>
             ) : null}
@@ -252,7 +272,7 @@ export default function DimensionsStep() {
 }
 
 const useStyles = makeStyles((c) => ({
-  row: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" },
   chips: { gap: spacing.sm },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   h: { fontFamily: fonts.text, fontSize: 16, fontWeight: "700", color: c.onSurface },
