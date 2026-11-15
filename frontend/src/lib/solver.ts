@@ -268,6 +268,7 @@ export interface GenInput {
   prefs: StylePrefs;
   budget: number;
   allocations: Partial<Record<CategoryId, number>>;
+  categoryBudgets?: Partial<Record<CategoryId, number>>; // total dollars for all units in a category
   seed: number;
 }
 
@@ -301,7 +302,15 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
   const sortedWalls = [...g.walls].sort((a, b) => b.s1 - b.s0 - (a.s1 - a.s0));
   if (!sortedWalls.length) return fail("No straight walls were found in this room outline.", "Adjust the room polygon so its walls are horizontal/vertical.");
   const customTotal = input.customItems.reduce((s, p) => s + p.price, 0);
-  const alloc = perUnitAllocation(needs, input.allocations, Math.max(0, budget - customTotal));
+  const defaultAlloc = perUnitAllocation(needs, input.allocations, Math.max(0, budget - customTotal));
+  const alloc = { ...defaultAlloc };
+  // Explicit user targets are independent, but final layouts still obey the room cap.
+  for (const [id, dollars] of Object.entries(input.categoryBudgets ?? {})) {
+    const qty = needs[id as CategoryId]?.qty ?? 0;
+    if (qty > 0 && typeof dollars === "number" && Number.isFinite(dollars)) {
+      alloc[id as CategoryId] = Math.max(0, dollars) / qty;
+    }
+  }
   const units: { uid: string; cat: CategoryId; idx: number; cands: Product[]; pick: number }[] = [];
   ORDER.forEach((cat) => {
     if (cat === "custom") return input.customItems.forEach((p) => units.push({ uid: `custom-${p.id}`, cat, idx: 0, cands: [p], pick: 0 }));
