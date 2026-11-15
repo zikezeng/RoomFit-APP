@@ -6,13 +6,22 @@ import { Pressable, Text, View } from "react-native";
 import { BudgetBar } from "@/src/components/BudgetBar";
 import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { ProductSheet } from "@/src/components/ProductSheet";
-import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { getProduct } from "@/src/lib/catalog";
 import { validatePlan } from "@/src/lib/multi-room";
 import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
+
+const FURNITURE_EMOJI: Record<string, string> = {
+  sofa: "🛋️", coffee_table: "☕", tv_stand: "📺", armchair: "🪑",
+  floor_lamp: "💡", dining_table: "🍽️", dining_chair: "🪑",
+  shoe_cabinet: "👟", cabinet: "🗄️", bed_frame: "🛏️", mattress: "🛏️",
+  nightstand: "🗄️", wardrobe: "👕", desk: "💻", study_chair: "🪑",
+  dresser: "🗄️", side_table: "☕", bookshelf: "📚", rug: "🧶",
+  console_table: "🗄️", ottoman: "🛋️", bench: "🪑",
+  floor_mirror: "🪞", planter: "🪴", custom: "📦",
+};
 
 export default function ShopStep() {
   const router = useRouter();
@@ -52,7 +61,7 @@ export default function ShopStep() {
             const p = getProduct(it.productId);
             return (
               <Pressable key={it.uid} onPress={() => setUid(it.uid)} testID={`shop-item-${it.uid}`} style={({ pressed }) => [s.item, pressed && { opacity: 0.8 }]}>
-                <ProductSwatch category={p.category} style={p.styles[0]} size={52} />
+                <View style={s.emojiBox}><Text style={s.emoji}>{FURNITURE_EMOJI[p.category] ?? "📦"}</Text></View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.name}>{p.name}</Text>
                   <Text style={s.caption}>
@@ -77,6 +86,8 @@ const useStyles = makeStyles((c) => ({
   h: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
   status: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginTop: spacing.sm },
   caption: { flex: 1, fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },
+  emojiBox: { width: 52, height: 52, alignItems: "center", justifyContent: "center", borderRadius: radius.md, backgroundColor: c.brandTertiary },
+  emoji: { fontSize: 29 },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, backgroundColor: c.surfaceSecondary, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border },
   name: { fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface },
   price: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.onSurface },
