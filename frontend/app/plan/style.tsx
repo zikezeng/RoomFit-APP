@@ -3,12 +3,12 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 
 import { Button, Card, Chip, Notice, tap } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { STYLE_ENGINE } from "@/src/lib/ai";
-import { MOODS, STYLES, categoriesFor } from "@/src/lib/catalog";
+import { STYLES, categoriesFor } from "@/src/lib/catalog";
 import { StyleId } from "@/src/lib/types";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -72,12 +72,6 @@ export default function StyleStep() {
           </Pressable>
         );
       })}
-      <Text style={s.h}>Mood (optional)</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-        {MOODS.map((m) => (
-          <Chip key={m.id} label={m.label} selected={state.moods.includes(m.id)} onPress={() => update({ moods: toggle(state.moods, m.id) }, "layouts")} testID={`mood-chip-${m.id}`} />
-        ))}
-      </ScrollView>
       <Notice text={STYLE_ENGINE.note} testID="style-engine-notice" />
       {state.styles.length === 0 ? <Button kind="ghost" small label="Pick at least one style to continue" onPress={() => {}} testID="style-hint" disabled /> : null}
     </WizardScaffold>
