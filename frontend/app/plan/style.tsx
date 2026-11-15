@@ -1,6 +1,5 @@
 import Feather from "@react-native-vector-icons/feather";
 import { Image } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React from "react";
@@ -33,11 +32,6 @@ export default function StyleStep() {
   const { colors } = useTheme();
   const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
-  const addInspiration = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.6 });
-    if (!r.canceled) update({ inspirations: [...state.inspirations, r.assets[0].uri] });
-  };
-
   return (
     <WizardScaffold
       step={5}
@@ -65,22 +59,7 @@ export default function StyleStep() {
           <Chip key={m.id} label={m.label} selected={state.moods.includes(m.id)} onPress={() => update({ moods: toggle(state.moods, m.id) }, "layouts")} testID={`mood-chip-${m.id}`} />
         ))}
       </ScrollView>
-      <Text style={s.h}>Upload an Inspiration Photo (optional)</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-        {state.inspirations.map((u, i) => (
-          <View key={u + i}>
-            <Image source={{ uri: u }} style={s.thumb} contentFit="cover" />
-            <Pressable testID={`remove-inspiration-${i}`} style={s.remove} onPress={() => update({ inspirations: state.inspirations.filter((_, j) => j !== i) })}>
-              <Feather name="x" size={14} color={colors.onSurfaceInverse} />
-            </Pressable>
-          </View>
-        ))}
-        <Pressable testID="add-inspiration-button" onPress={addInspiration} style={[s.thumb, s.add]}>
-          <Feather name="image" size={22} color={colors.muted} />
-          <Text style={s.addText}>Add photo</Text>
-        </Pressable>
-      </ScrollView>
-      <Notice text={`${STYLE_ENGINE.note} Inspiration photos are saved for reference only.`} testID="style-engine-notice" />
+      <Notice text={STYLE_ENGINE.note} testID="style-engine-notice" />
       {state.styles.length === 0 ? <Button kind="ghost" small label="Pick at least one style to continue" onPress={() => {}} testID="style-hint" disabled /> : null}
     </WizardScaffold>
   );
@@ -97,8 +76,4 @@ const useStyles = makeStyles((c) => ({
   badge: { position: "absolute", top: spacing.md, right: spacing.md, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: c.onSurfaceInverse, alignItems: "center", justifyContent: "center" },
   badgeOn: { backgroundColor: c.brandPrimary, borderColor: c.brandPrimary },
   h: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
-  thumb: { width: 96, height: 96, borderRadius: radius.md, flexShrink: 0 },
-  add: { borderWidth: 1.5, borderStyle: "dashed", borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: c.surfaceSecondary },
-  addText: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
-  remove: { position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 12, backgroundColor: c.surfaceInverse, alignItems: "center", justifyContent: "center" },
 }));
