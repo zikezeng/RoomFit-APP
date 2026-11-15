@@ -4,7 +4,6 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { PlanCanvas, roomColor } from "@/src/components/PlanCanvas";
-
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { KIND_LABEL, buildGeom, pointInPoly, roomStats } from "@/src/lib/apartment";
 import { FURNISHABLE } from "@/src/lib/catalog";
@@ -19,14 +18,15 @@ export default function RoomsStep() {
   const { colors } = useTheme();
   const ap = state.apartment;
   const rooms = [...ap.rooms].sort((a, b) => roomRank(a.kind) - roomRank(b.kind));
-  const canContinue = state.selectedRoomIds.length > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
+  const selectedCount = state.selectedRoomIds.length;
+  const canContinue = selectedCount > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
 
   return (
     <WizardScaffold
       step={3}
       title="Which Rooms Would You Like to Furnish?"
-      subtitle="Select rooms on your plan or below. Furnish each selected room one at a time."
-      cta={{ label: `Furnish ${state.selectedRoomIds.length} rooms`, disabled: !canContinue, onPress: () => { startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
+      subtitle="Choose all the rooms you want to furnish. Tap the floor plan or the list to select multiple rooms."
+      cta={{ label: selectedCount ? `Furnish ${selectedCount} ${selectedCount === 1 ? "room" : "rooms"}` : "Select rooms", disabled: !canContinue, onPress: () => { startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
     >
       <PlanCanvas
         ap={ap}
@@ -43,14 +43,14 @@ export default function RoomsStep() {
         const ok = FURNISHABLE.includes(r.kind);
         const on = state.selectedRoomIds.includes(r.id);
         return (
-          <Pressable key={r.id} disabled={!ok} accessibilityState={{ disabled: !ok, selected: on }} testID={`select-room-${r.kind}-${r.id}`} onPress={() => selectRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
+          <Pressable key={r.id} disabled={!ok} accessibilityRole="checkbox" accessibilityState={{ disabled: !ok, checked: on }} testID={`select-room-${r.kind}-${r.id}`} onPress={() => selectRoom(r.id)} style={[s.row, on && { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary }]}>
             <View style={[s.dot, { backgroundColor: roomColor(colors, r.kind) }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{r.label}</Text>
               <Text style={s.p}>{st ? `${fmtLen(st.w, ap.unit)} × ${fmtLen(st.l, ap.unit)} · ${fmtAreaCm2(st.area, ap.unit)}` : "Uncalibrated"}</Text>
               <Text style={[s.p, { color: ok ? colors.success : colors.muted, fontWeight: "600" }]}>{ok ? "Auto-furnishing supported" : `${KIND_LABEL[r.kind]} · furnishing not supported yet`}</Text>
             </View>
-            {on ? <Feather name="check-circle" size={22} color={colors.brandPrimary} /> : null}
+            {ok ? <Feather name={on ? "check-square" : "square"} size={22} color={on ? colors.brandPrimary : colors.muted} /> : null}
           </Pressable>
         );
       })}
