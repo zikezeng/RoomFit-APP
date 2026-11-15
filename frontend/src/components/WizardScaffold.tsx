@@ -2,7 +2,8 @@ import Feather from "@react-native-vector-icons/feather";
 import { BlurView } from "expo-blur";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -21,15 +22,19 @@ interface Props {
   secondary?: { label: string; onPress: () => void; testID: string };
   header?: React.ReactNode; // sticky content under the title
   scrollEnabled?: boolean;
+  keyboardAware?: boolean;
 }
 
-export function WizardScaffold({ step, title, subtitle, children, cta, secondary, header, scrollEnabled = true }: Props) {
+export function WizardScaffold({ step, title, subtitle, children, cta, secondary, header, scrollEnabled = true, keyboardAware = false }: Props) {
   const { state, previousRoom } = usePlan();
   const currentRoom = state.apartment.rooms.find(r => r.id === state.selectedRoomId);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const s = useStyles();
   const { colors } = useTheme();
+  const useKeyboardScroll = keyboardAware && Platform.OS !== "web";
+  const ContentScroll = useKeyboardScroll ? KeyboardAwareScrollView : ScrollView;
+  const keyboardProps = useKeyboardScroll ? { bottomOffset: (cta ? 96 : spacing.md) + insets.bottom } : {};
   return (
     <View style={s.root}>
       <View style={[s.top, { paddingTop: insets.top + spacing.sm }]}>
@@ -61,7 +66,7 @@ export function WizardScaffold({ step, title, subtitle, children, cta, secondary
         {step >= 4 && step <= 9 && currentRoom ? <Text style={s.stepText} testID="room-progress-label">Room {state.selectedRoomIds.indexOf(currentRoom.id) + 1} of {state.selectedRoomIds.length} — {currentRoom.label}</Text> : null}
         {header}
       </View>
-      <ScrollView scrollEnabled={scrollEnabled} contentContainerStyle={[s.content, { paddingBottom: (cta ? 120 : spacing.xl) + insets.bottom }]} keyboardShouldPersistTaps="handled">
+      <ContentScroll {...keyboardProps} scrollEnabled={scrollEnabled} contentContainerStyle={[s.content, { paddingBottom: (cta ? 120 : spacing.xl) + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Animated.View entering={FadeInDown.duration(400)}>
           <Text style={s.title} testID="wizard-title">
             {title}
@@ -71,7 +76,7 @@ export function WizardScaffold({ step, title, subtitle, children, cta, secondary
         <Animated.View entering={FadeInDown.delay(80).duration(400)} style={{ gap: spacing.lg }}>
           {children}
         </Animated.View>
-      </ScrollView>
+      </ContentScroll>
       {cta ? (
         <BlurView intensity={40} tint="light" style={[s.bottom, { paddingBottom: insets.bottom + spacing.md }]}>
           {secondary ? <Button kind="secondary" label={secondary.label} onPress={secondary.onPress} testID={secondary.testID} style={{ flex: 1 }} /> : null}
