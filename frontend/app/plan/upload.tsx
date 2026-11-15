@@ -6,15 +6,14 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 
-import { Button, Card, Chip, Notice } from "@/src/components/ui";
+import { Button, Card, Notice } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { segmentFloorPlan } from "@/src/lib/ai";
 import { HOME_TYPES, estimateScale, guessKinds, uid } from "@/src/lib/apartment";
-import { Apartment, HomeType, PlanRoom } from "@/src/lib/types";
+import { Apartment, PlanRoom } from "@/src/lib/types";
 import { emptyApartment, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-const AVAILABLE_HOME_TYPES = HOME_TYPES.filter(({ id }) => id === "2b1b" || id === "3b2b");
 type UploadApartment = Apartment & { customHomeType?: string };
 
 export default function UploadStep() {
@@ -24,17 +23,14 @@ export default function UploadStep() {
   const { colors } = useTheme();
   const ap: UploadApartment = state.apartment;
   const [size, setSize] = useState(ap.sizeSqft ? String(ap.sizeSqft) : "");
-  const [home, setHome] = useState<HomeType | "other" | null>(() => {
-    if (AVAILABLE_HOME_TYPES.some(({ id }) => id === ap.homeType) && !ap.customHomeType) return ap.homeType;
-    return ap.customHomeType || ap.homeType ? "other" : null;
-  });
-  const [customHome, setCustomHome] = useState(ap.customHomeType ?? HOME_TYPES.find(({ id }) => id === ap.homeType)?.label ?? "");
+  const [homeText, setHomeText] = useState(ap.customHomeType ?? HOME_TYPES.find(({ id }) => id === ap.homeType)?.label ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const sqft = parseInt(size, 10);
-  const customHomeType = home === "other" ? customHome.trim() : undefined;
-  const homeType = home === "other" ? null : home;
-  const infoOk = sqft >= 150 && sqft <= 10000 && (home === "other" ? !!customHomeType : !!homeType);
+  const customHomeType = homeText.trim();
+  const normalizedHomeType = customHomeType.toLowerCase().replace(/\s+/g, "");
+  const homeType = HOME_TYPES.find(({ id }) => id === normalizedHomeType)?.id ?? null;
+  const infoOk = sqft >= 150 && sqft <= 10000 && !!customHomeType;
 
   const saveInfo = () =>
     setApartment((a): UploadApartment => {
@@ -104,24 +100,16 @@ export default function UploadStep() {
         <Text style={s.k}>Apartment size (sq ft)</Text>
         <TextInput testID="apartment-size-input" style={s.input} keyboardType="number-pad" value={size} placeholder="e.g. 650" placeholderTextColor={colors.muted} onChangeText={(t) => setSize(t.replace(/[^0-9]/g, ""))} />
         <Text style={s.k}>Home type</Text>
-        <View style={s.wrap}>
-          {AVAILABLE_HOME_TYPES.map((h) => (
-            <Chip key={h.id} label={h.label} selected={home === h.id} onPress={() => setHome(h.id)} testID={`home-type-${h.id}`} />
-          ))}
-          <Chip label="Other" selected={home === "other"} onPress={() => setHome("other")} testID="home-type-other" />
-        </View>
-        {home === "other" ? (
-          <TextInput
-            accessibilityLabel="Custom home type"
-            testID="custom-home-type-input"
-            style={s.input}
-            value={customHome}
-            onChangeText={setCustomHome}
-            placeholder="Enter your home type"
-            placeholderTextColor={colors.muted}
-            maxLength={80}
-          />
-        ) : null}
+        <TextInput
+          accessibilityLabel="Home type"
+          testID="custom-home-type-input"
+          style={s.input}
+          value={homeText}
+          onChangeText={setHomeText}
+          placeholder="Enter your home type"
+          placeholderTextColor={colors.muted}
+          maxLength={80}
+        />
       </Card>
 
       <Text style={s.h}>2. Floor plan</Text>
@@ -148,7 +136,7 @@ export default function UploadStep() {
         </Card>
       ) : null}
 
-      <Button kind="ghost" small label="No floor plan? Try a Demo apartment" icon="play-circle" onPress={() => (loadDemo(), setErr(null), setSize("650"), setHome(null), setCustomHome(""))} testID="try-demo-button" />
+      <Button kind="ghost" small label="No floor plan? Try a Demo apartment" icon="play-circle" onPress={() => (loadDemo(), setErr(null), setSize("650"), setHomeText("1B1B"))} testID="try-demo-button" />
       {ap.source === "sample" ? <Notice text="Demo mode: a structured sample 1B1B apartment (650 sq ft), not your upload." testID="demo-notice" /> : null}
     </WizardScaffold>
   );
@@ -158,7 +146,6 @@ const useStyles = makeStyles((c) => ({
   h: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
   k: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   input: { height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, paddingHorizontal: spacing.md, fontFamily: fonts.text, fontSize: 16, color: c.onSurface },
-  wrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   drop: { borderWidth: 2, borderStyle: "dashed", borderColor: c.borderStrong, borderRadius: radius.lg, padding: spacing.xxl, alignItems: "center", gap: spacing.sm, backgroundColor: c.surfaceSecondary },
   dropTitle: { fontFamily: fonts.text, fontSize: 16, fontWeight: "600", color: c.onSurface },
   dropSub: { flexShrink: 1, fontFamily: fonts.text, fontSize: 13, color: c.muted, lineHeight: 19, textAlign: "center" },
