@@ -3,13 +3,13 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
-import { Button, Chip, Notice, tap } from "@/src/components/ui";
+import { Button, Card, Chip, Notice, tap } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { STYLE_ENGINE } from "@/src/lib/ai";
-import { MOODS, STYLES } from "@/src/lib/catalog";
+import { MOODS, STYLES, categoriesFor } from "@/src/lib/catalog";
 import { StyleId } from "@/src/lib/types";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -31,6 +31,12 @@ export default function StyleStep() {
   const { state, update } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
+  const [previewRoomId, setPreviewRoomId] = useState<string | null>(null);
+  const selectedRooms = state.selectedRoomIds.flatMap((id) => {
+    const room = state.apartment.rooms.find((r) => r.id === id);
+    return room ? [room] : [];
+  });
+  const previewRoom = selectedRooms.find((r) => r.id === (previewRoomId ?? state.selectedRoomId)) ?? selectedRooms[0];
   const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
   const addInspiration = async () => {
@@ -45,6 +51,19 @@ export default function StyleStep() {
       subtitle="Pick one or more styles. We'll rank furniture that fits to match your taste."
       cta={{ label: "Continue", disabled: state.styles.length === 0, onPress: () => router.push("/plan/budget"), testID: "style-continue-button" }}
     >
+      {selectedRooms.length > 1 && previewRoom ? (
+        <Card style={{ gap: spacing.sm }} testID="style-room-preview">
+          <Text style={s.h}>Furniture by room</Text>
+          <View style={s.roomChips}>
+            {selectedRooms.map((room) => (
+              <Chip key={room.id} label={room.label} selected={previewRoom.id === room.id} onPress={() => setPreviewRoomId(room.id)} testID={`style-preview-room-${room.id}`} />
+            ))}
+          </View>
+          <Text style={s.roomCategories} testID="style-room-categories">
+            {categoriesFor(previewRoom.kind).map((category) => category.label).join(" · ")}
+          </Text>
+        </Card>
+      ) : null}
       {STYLES.map((st) => {
         const on = state.styles.includes(st.id);
         return (
@@ -96,6 +115,8 @@ const useStyles = makeStyles((c) => ({
   cardSub: { fontFamily: fonts.text, fontSize: 13, color: c.onSurfaceInverse, opacity: 0.9 },
   badge: { position: "absolute", top: spacing.md, right: spacing.md, width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: c.onSurfaceInverse, alignItems: "center", justifyContent: "center" },
   badgeOn: { backgroundColor: c.brandPrimary, borderColor: c.brandPrimary },
+  roomChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  roomCategories: { fontFamily: fonts.text, fontSize: 14, lineHeight: 21, color: c.onSurface },
   h: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
   thumb: { width: 96, height: 96, borderRadius: radius.md, flexShrink: 0 },
   add: { borderWidth: 1.5, borderStyle: "dashed", borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: c.surfaceSecondary },
