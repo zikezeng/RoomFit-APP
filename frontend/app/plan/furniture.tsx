@@ -349,9 +349,6 @@ function FurnitureRoom() {
           </View>
         ))}
 
-        {state.customItems.some((p) => p.description === CUSTOM_PLACEHOLDER_DESCRIPTION) ? (
-          <Text style={s.p}>Custom items use an estimated size in the layout.</Text>
-        ) : null}
         {state.customItems.map((p) => (
           <View
             key={p.id}
