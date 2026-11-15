@@ -2,8 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
-import { ProductSwatch } from "@/src/components/ProductSwatch";
-import { Button, Card, Notice, Stepper, money } from "@/src/components/ui";
+import { Button, Card, Notice, Stepper } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { KIND_LABEL, uid } from "@/src/lib/apartment";
 import { CATEGORIES, categoriesFor } from "@/src/lib/catalog";
@@ -16,6 +15,37 @@ const ESSENTIALS: Partial<Record<RoomKind, CategoryId[]>> = {
   living: ["sofa", "coffee_table", "tv_stand", "floor_lamp"],
   bedroom: ["bed_frame", "nightstand", "desk", "floor_lamp"],
 };
+
+const FURNITURE_EMOJI: Record<CategoryId, string> = {
+  sofa: "🛋️",
+  coffee_table: "☕",
+  tv_stand: "📺",
+  armchair: "🪑",
+  floor_lamp: "💡",
+  dining_table: "🍽️",
+  dining_chair: "🪑",
+  shoe_cabinet: "👟",
+  cabinet: "🗄️",
+  bed_frame: "🛏️",
+  mattress: "🛏️",
+  nightstand: "🛎️",
+  wardrobe: "👕",
+  desk: "💻",
+  study_chair: "🪑",
+  dresser: "🗄️",
+  side_table: "🪴",
+  bookshelf: "📚",
+  rug: "🧶",
+  console_table: "🪴",
+  ottoman: "🛋️",
+  bench: "🪑",
+  floor_mirror: "🪞",
+  planter: "🪴",
+  custom: "📦",
+};
+
+const CUSTOM_PLACEHOLDER_SIZE = 60; // cm, for layout preview only
+const CUSTOM_PLACEHOLDER_DESCRIPTION = "Custom item shown with an estimated footprint in the layout.";
 
 const normalizeName = (name: string) =>
   name.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
@@ -92,12 +122,7 @@ function FurnitureRoom() {
   }, [ready, room, kind, cats, state.needs, update]);
 
   const needs = state.needs;
-  const [form, setForm] = useState({
-    name: "",
-    w: "",
-    d: "",
-    price: "",
-  });
+  const [itemName, setItemName] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   const set = (id: CategoryId, patch: Partial<Need>) =>
@@ -129,7 +154,7 @@ function FurnitureRoom() {
       return setErr("Choose a room before adding furniture.");
     }
 
-    const name = form.name.trim();
+    const name = itemName.trim();
     if (!name) {
       return setErr("Give your item a name.");
     }
@@ -149,7 +174,7 @@ function FurnitureRoom() {
         qty: qty + 1,
         priority: isEssential(category.id) ? "essential" : "optional",
       });
-      setForm({ name: "", w: "", d: "", price: "" });
+      setItemName("");
       setErr(null);
       return;
     }
@@ -158,36 +183,24 @@ function FurnitureRoom() {
       return setErr("This furniture belongs to a different room type.");
     }
 
-    const w = Number(form.w);
-    const d = Number(form.d);
-    const price = Number(form.price || "0");
-
-    if (!(w >= 10 && w <= 400 && d >= 10 && d <= 400)) {
-      return setErr("Width and depth must be between 10 and 400 cm.");
-    }
-
-    if (!(price >= 0 && price <= 20000)) {
-      return setErr("Price must be between $0 and $20,000.");
-    }
-
     const p: Product = {
       id: `custom-${uid()}`,
-      name: form.name.trim(),
+      name,
       category: "custom",
-      width: w,
-      depth: d,
+      width: CUSTOM_PLACEHOLDER_SIZE,
+      depth: CUSTOM_PLACEHOLDER_SIZE,
       height: 80,
-      price,
+      price: 0,
       styles: [],
       mood: "warm",
       retailer: "Your own item",
       url: null,
       description:
-        "Custom item you added. Placed along a free wall and checked like every other piece.",
+        CUSTOM_PLACEHOLDER_DESCRIPTION,
     };
 
     update({ customItems: [...state.customItems, p] }, "all");
-    setForm({ name: "", w: "", d: "", price: "" });
+    setItemName("");
     setErr(null);
   };
 
@@ -209,10 +222,13 @@ function FurnitureRoom() {
             <View key={c.id} style={[s.item, on && s.itemOn]}>
               <Pressable
                 testID={`furniture-card-${c.id}`}
+                accessibilityRole="checkbox"
+                accessibilityLabel={c.label}
+                accessibilityState={{ checked: on }}
                 onPress={() => set(c.id, { qty: on ? 0 : 1 })}
                 style={s.main}
               >
-                <ProductSwatch category={c.id} size={52} />
+                <Text accessible={false} style={s.emoji}>{FURNITURE_EMOJI[c.id]}</Text>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={s.name}>{c.label}</Text>
                   <Text style={s.p}>{c.hint}</Text>
@@ -288,50 +304,15 @@ function FurnitureRoom() {
 
       <Card style={{ gap: spacing.md }} testID="custom-item-card">
         <Text style={s.h}>Optional</Text>
-        <Text style={s.p}>
-          Type another furniture item and tap Add item. Add as many
-          different items as you need. For items outside our catalog,
-          enter their width and depth so we can check the fit.
-        </Text>
-
         <TextInput
           testID="custom-name-input"
+          accessibilityLabel="Item name"
           style={s.input}
           placeholder="Item name (e.g. Piano)"
           placeholderTextColor={colors.muted}
-          value={form.name}
-          onChangeText={(t) => setForm({ ...form, name: t })}
+          value={itemName}
+          onChangeText={setItemName}
         />
-
-        <View style={s.row}>
-          <TextInput
-            testID="custom-width-input"
-            style={[s.input, { flex: 1 }]}
-            placeholder="Width cm"
-            keyboardType="number-pad"
-            placeholderTextColor={colors.muted}
-            value={form.w}
-            onChangeText={(t) => setForm({ ...form, w: t })}
-          />
-          <TextInput
-            testID="custom-depth-input"
-            style={[s.input, { flex: 1 }]}
-            placeholder="Depth cm"
-            keyboardType="number-pad"
-            placeholderTextColor={colors.muted}
-            value={form.d}
-            onChangeText={(t) => setForm({ ...form, d: t })}
-          />
-          <TextInput
-            testID="custom-price-input"
-            style={[s.input, { flex: 1 }]}
-            placeholder="Price $"
-            keyboardType="number-pad"
-            placeholderTextColor={colors.muted}
-            value={form.price}
-            onChangeText={(t) => setForm({ ...form, price: t })}
-          />
-        </View>
 
         {err ? (
           <Notice
@@ -356,7 +337,7 @@ function FurnitureRoom() {
             testID={`optional-item-${c.id}`}
           >
             <Text style={[s.p, { flex: 1 }]}>
-              {needs[c.id]!.qty}× {c.label}
+              {FURNITURE_EMOJI[c.id]} {needs[c.id]!.qty}× {c.label}
             </Text>
             <Button
               small
@@ -375,7 +356,7 @@ function FurnitureRoom() {
             testID={`custom-item-${p.id}`}
           >
             <Text style={[s.p, { flex: 1 }]}>
-              {p.name} · {p.width}×{p.depth} cm · {money(p.price)}
+              {FURNITURE_EMOJI.custom} {p.name}
             </Text>
             <Button
               small
@@ -424,6 +405,7 @@ const useStyles = makeStyles((c) => ({
     alignItems: "center",
     gap: spacing.md,
   },
+  emoji: { width: 52, textAlign: "center", fontSize: 30 },
   item: {
     flexDirection: "row",
     alignItems: "center",
