@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 
 import { Button, Card, Notice, Stepper } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
@@ -28,15 +28,15 @@ const FURNITURE_EMOJI: Record<CategoryId, string> = {
   cabinet: "🗄️",
   bed_frame: "🛏️",
   mattress: "🛏️",
-  nightstand: "🛎️",
+  nightstand: "🗄️",
   wardrobe: "👕",
   desk: "💻",
   study_chair: "🪑",
   dresser: "🗄️",
-  side_table: "🪴",
+  side_table: "☕",
   bookshelf: "📚",
   rug: "🧶",
-  console_table: "🪴",
+  console_table: "🗄️",
   ottoman: "🛋️",
   bench: "🪑",
   floor_mirror: "🪞",
@@ -57,6 +57,31 @@ const matchesName = (name: string, c: typeof CATEGORIES[number]) =>
     ...c.label.split("/").map((s) => s.trim()),
     ...(c.id === "bookshelf" ? ["bookcase"] : []),
   ].some((label) => normalizeName(label) === normalizeName(name));
+
+const CUSTOM_ITEM_ICONS: [RegExp, string][] = [
+  [/\b(piano|keyboard)\b|鋼琴|钢琴|電子琴|电子琴/i, "🎹"],
+  [/\b(guitar|ukulele)\b|吉他/i, "🎸"],
+  [/\b(sofas?|couch(es)?|loveseats?|sectionals?)\b|沙發|沙发/i, "🛋️"],
+  [/\b(beds?|futons?|mattress(es)?)\b|床/i, "🛏️"],
+  [/\b(chairs?|benches|bench|stools?|recliners?)\b|椅|凳/i, "🪑"],
+  [/\b(lamps?|lights?)\b|燈|灯/i, "💡"],
+  [/\b(bookcases?|bookshel(f|ves)|book racks?)\b|書架|书架/i, "📚"],
+  [/\b(desks?)\b|書桌|书桌/i, "💻"],
+  [/\b(tables?)\b|桌/i, "☕"],
+  [/\b(cabinets?|wardrobes?|dressers?|shelves|shelf)\b|櫃|柜/i, "🗄️"],
+  [/\b(mirrors?)\b|鏡|镜/i, "🪞"],
+  [/\b(plants?|planters?|vases?)\b|盆栽|花瓶/i, "🪴"],
+  [/\b(rugs?|carpets?)\b|地毯/i, "🧶"],
+  [/\b(tv|televisions?|monitors?)\b|電視|电视/i, "📺"],
+  [/\b(bikes?|bicycles?)\b|腳踏車|自行车/i, "🚲"],
+  [/\b(aquariums?|fish tanks?)\b|魚缸|鱼缸/i, "🐠"],
+];
+
+const customItemIcon = (name: string) => {
+  const category = CATEGORIES.find((c) => matchesName(name, c));
+  if (category) return FURNITURE_EMOJI[category.id];
+  return CUSTOM_ITEM_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? FURNITURE_EMOJI.custom;
+};
 
 export default function FurnitureStep() {
   const { state } = usePlan();
@@ -94,6 +119,9 @@ function FurnitureRoom() {
 
   const isEssential = (id: CategoryId) =>
     essentials.some((c) => c.id === id);
+
+  const maxQuantity = (category: typeof CATEGORIES[number]) =>
+    isEssential(category.id) ? Math.max(2, category.maxQty) : category.maxQty;
 
   // Remove stale, hidden room-specific needs before layout generation.
   useEffect(() => {
@@ -164,9 +192,10 @@ function FurnitureRoom() {
     if (category) {
       const qty = needs[category.id]?.qty ?? 0;
 
-      if (qty >= category.maxQty) {
+      const max = maxQuantity(category);
+      if (qty >= max) {
         return setErr(
-          `You can add up to ${category.maxQty} × ${category.label}.`
+          `You can add up to ${max} × ${category.label}.`
         );
       }
 
@@ -204,73 +233,11 @@ function FurnitureRoom() {
     setErr(null);
   };
 
-  const section = () => {
-    const list = essentials;
-
-    return (
-      <View style={{ gap: spacing.md }}>
-        <Text style={s.h}>Essentials</Text>
-
-        {list.map((c) => {
-          const n = needs[c.id] ?? {
-            qty: 0,
-            priority: "essential" as const,
-          };
-          const on = n.qty > 0;
-
-          return (
-            <View key={c.id} style={[s.item, on && s.itemOn]}>
-              <Pressable
-                testID={`furniture-card-${c.id}`}
-                accessibilityRole="checkbox"
-                accessibilityLabel={c.label}
-                accessibilityState={{ checked: on }}
-                onPress={() => set(c.id, { qty: on ? 0 : 1 })}
-                style={s.main}
-              >
-                <Text accessible={false} style={s.emoji}>{FURNITURE_EMOJI[c.id]}</Text>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.name}>{c.label}</Text>
-                  <Text style={s.p}>{c.hint}</Text>
-                </View>
-              </Pressable>
-
-              {on && c.maxQty > 1 ? (
-                <Stepper
-                  value={n.qty}
-                  min={0}
-                  max={c.maxQty}
-                  onChange={(v) => set(c.id, { qty: v })}
-                  testID={`qty-${c.id}`}
-                />
-              ) : (
-                <Pressable
-                  testID={`furniture-toggle-${c.id}`}
-                  onPress={() => set(c.id, { qty: on ? 0 : 1 })}
-                  style={[s.check, on && s.checkOn]}
-                >
-                  <Text
-                    style={[
-                      s.checkText,
-                      on && { color: colors.onBrandPrimary },
-                    ]}
-                  >
-                    {on ? "✓" : "+"}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
-
   return (
     <WizardScaffold
       step={4}
       title="What Does Your Room Need?"
-      subtitle={`${room?.label ?? "Room"} (${KIND_LABEL[kind]}) · tap to add or remove. You don't need everything.`}
+      subtitle={`${room?.label ?? "Room"} (${KIND_LABEL[kind]}) · Adjust the quantity for each item.`}
       cta={{
         label: `Continue with ${count} items`,
         disabled: !ready || !room || count === 0,
@@ -300,7 +267,30 @@ function FurnitureRoom() {
         </Text>
       </Card>
 
-      {section()}
+      <View style={{ gap: spacing.md }}>
+        <Text style={s.h}>Essentials</Text>
+        {essentials.map((category) => {
+          const qty = needs[category.id]?.qty ?? 0;
+          return (
+            <View key={category.id} testID={`furniture-card-${category.id}`} style={[s.item, qty > 0 && s.itemOn]}>
+              <View style={s.main}>
+                <Text accessible={false} style={s.emoji}>{FURNITURE_EMOJI[category.id]}</Text>
+                <View style={s.itemDetails}>
+                  <Text style={s.name}>{category.label}</Text>
+                  <Text style={s.p}>{category.hint}</Text>
+                </View>
+              </View>
+              <Stepper
+                value={qty}
+                min={0}
+                max={maxQuantity(category)}
+                onChange={(value) => set(category.id, { qty: value })}
+                testID={`qty-${category.id}`}
+              />
+            </View>
+          );
+        })}
+      </View>
 
       <Card style={{ gap: spacing.md }} testID="custom-item-card">
         <Text style={s.h}>Optional</Text>
@@ -356,7 +346,7 @@ function FurnitureRoom() {
             testID={`custom-item-${p.id}`}
           >
             <Text style={[s.p, { flex: 1 }]}>
-              {FURNITURE_EMOJI.custom} {p.name}
+              {customItemIcon(p.name)} {p.name}
             </Text>
             <Button
               small
@@ -405,7 +395,8 @@ const useStyles = makeStyles((c) => ({
     alignItems: "center",
     gap: spacing.md,
   },
-  emoji: { width: 52, textAlign: "center", fontSize: 30 },
+  itemDetails: { flex: 1, gap: 2 },
+  emoji: { width: 40, textAlign: "center", fontSize: 30 },
   item: {
     flexDirection: "row",
     alignItems: "center",
@@ -419,25 +410,6 @@ const useStyles = makeStyles((c) => ({
   itemOn: {
     borderColor: c.brandPrimary,
     backgroundColor: c.brandTertiary,
-  },
-  check: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: c.borderStrong,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkOn: {
-    backgroundColor: c.brandPrimary,
-    borderColor: c.brandPrimary,
-  },
-  checkText: {
-    fontFamily: fonts.text,
-    fontSize: 16,
-    fontWeight: "700",
-    color: c.onSurfaceTertiary,
   },
   row: {
     flexDirection: "row",
