@@ -40,7 +40,6 @@ export default function UploadStep() {
 
   const pick = async () => {
     setErr(null);
-    if (busy) return;
     if (!infoOk) return setErr("Enter the apartment size (150–10,000 sq ft) and home type first.");
     const res = await DocumentPicker.getDocumentAsync({ type: ["image/jpeg", "image/png", "application/pdf"], copyToCacheDirectory: true });
     if (res.canceled) return;
@@ -67,7 +66,7 @@ export default function UploadStep() {
         note = rooms.length
           ? named
             ? `Found ${rooms.length} rooms with the CubiCasa5K floor plan model. Room names are suggestions — please confirm them.`
-            : `Found ${rooms.length} enclosed areas. Review and confirm the room types in the next step.`
+            : `Found ${rooms.length} enclosed areas by detecting the walls in your image. ${homeType ? "Room names are suggestions — please confirm them." : "Please assign a type to each room."}`
           : "No rooms were detected. Try uploading a clearer floor plan.";
       } catch {
         note = "Automatic wall detection failed. Try uploading a clearer floor plan.";
@@ -87,7 +86,7 @@ export default function UploadStep() {
       subtitle="Tell us about your apartment, then upload its floor plan (JPG or PNG)."
       cta={{
         label: "Continue",
-        disabled: !ap.source || !ap.rooms.length || busy || (ap.source === "upload" && !infoOk),
+        disabled: !ap.source || busy || (ap.source === "upload" && !infoOk),
         onPress: () => {
           if (ap.source === "upload" && (ap.sizeSqft !== sqft || ap.homeType !== homeType || ap.customHomeType !== customHomeType)) saveInfo();
           router.push("/plan/dimensions");
