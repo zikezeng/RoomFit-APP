@@ -236,6 +236,7 @@ function FurnitureRoom() {
   return (
     <WizardScaffold
       step={4}
+      keyboardAware
       title="What Does Your Room Need?"
       subtitle={`${room?.label ?? "Room"} (${KIND_LABEL[kind]}) · Adjust the quantity for each item.`}
       cta={{
