@@ -9,32 +9,42 @@ import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-nativ
 import { Button, Card, Chip, Notice } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { segmentFloorPlan } from "@/src/lib/ai";
-import { HOME_TYPES, estimateScale, guessKinds } from "@/src/lib/apartment";
-import { HomeType } from "@/src/lib/types";
+import { HOME_TYPES, estimateScale, guessKinds, uid } from "@/src/lib/apartment";
+import { Apartment, HomeType, PlanRoom } from "@/src/lib/types";
 import { emptyApartment, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
+
+const AVAILABLE_HOME_TYPES = HOME_TYPES.filter(({ id }) => id === "2b1b" || id === "3b2b");
+type UploadApartment = Apartment & { customHomeType?: string };
 
 export default function UploadStep() {
   const router = useRouter();
   const { state, setApartment, loadDemo } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
-  const ap = state.apartment;
+  const ap: UploadApartment = state.apartment;
   const [size, setSize] = useState(ap.sizeSqft ? String(ap.sizeSqft) : "");
-  const [home, setHome] = useState<HomeType | null>(ap.homeType);
+  const [home, setHome] = useState<HomeType | "other" | null>(() => {
+    if (AVAILABLE_HOME_TYPES.some(({ id }) => id === ap.homeType) && !ap.customHomeType) return ap.homeType;
+    return ap.customHomeType || ap.homeType ? "other" : null;
+  });
+  const [customHome, setCustomHome] = useState(ap.customHomeType ?? HOME_TYPES.find(({ id }) => id === ap.homeType)?.label ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const sqft = parseInt(size, 10);
-  const infoOk = sqft >= 150 && sqft <= 10000 && !!home;
+  const customHomeType = home === "other" ? customHome.trim() : undefined;
+  const homeType = home === "other" ? null : home;
+  const infoOk = sqft >= 150 && sqft <= 10000 && (home === "other" ? !!customHomeType : !!homeType);
 
-  const saveInfo = (sz: number, h: HomeType | null) =>
-    setApartment((a) => {
-      const autoScale = a.rooms.length && sz >= 150 ? estimateScale(a.rooms, sz) : a.autoScale;
-      return { ...a, sizeSqft: sz >= 150 ? sz : null, homeType: h, autoScale };
+  const saveInfo = () =>
+    setApartment((a): UploadApartment => {
+      const autoScale = a.rooms.length ? estimateScale(a.rooms, sqft) : a.autoScale;
+      return { ...a, sizeSqft: sqft, homeType, customHomeType, autoScale };
     });
 
   const pick = async () => {
     setErr(null);
+    if (busy) return;
     if (!infoOk) return setErr("Enter the apartment size (150–10,000 sq ft) and home type first.");
     const res = await DocumentPicker.getDocumentAsync({ type: ["image/jpeg", "image/png", "application/pdf"], copyToCacheDirectory: true });
     if (res.canceled) return;
@@ -46,22 +56,25 @@ export default function UploadStep() {
       const ctx = ImageManipulator.manipulate(a.uri);
       if (first.width > 1400) ctx.resize({ width: 1400 });
       const out = await (await ctx.renderAsync()).saveAsync({ format: SaveFormat.JPEG, compress: 0.85, base64: true });
-      const base = { ...emptyApartment(), source: "upload" as const, fileName: a.name, imageUri: `data:image/jpeg;base64,${out.base64}`, imgW: out.width, imgH: out.height, sizeSqft: sqft, homeType: home };
+      const base: UploadApartment = { ...emptyApartment(), source: "upload", fileName: a.name, imageUri: `data:image/jpeg;base64,${out.base64}`, imgW: out.width, imgH: out.height, sizeSqft: sqft, homeType, customHomeType };
       let rooms = base.rooms;
       let note = "";
       try {
         const seg = await segmentFloorPlan(out.base64!);
-        rooms = guessKinds(seg.rooms.map((r) => r.polygon.map(([x, y]) => ({ x: (x / 1000) * out.width, y: (y / 1000) * out.height }))), home!);
+        const polys = seg.rooms.map((r) => r.polygon.map(([x, y]) => ({ x: (x / 1000) * out.width, y: (y / 1000) * out.height })));
+        rooms = homeType
+          ? guessKinds(polys, homeType)
+          : polys.map((poly, i): PlanRoom => ({ id: uid(), kind: "other", label: `Room ${i + 1}`, poly }));
         // The CubiCasa5K service also names each room (from the model + fixtures found inside it).
         const named = seg.rooms.some((r) => r.type);
         if (named) rooms = rooms.map((r, i) => (seg.rooms[i]?.type ? { ...r, kind: seg.rooms[i].type!, label: seg.rooms[i].label ?? r.label } : r));
         note = rooms.length
           ? named
             ? `Found ${rooms.length} rooms with the CubiCasa5K floor plan model. Room names are suggestions — please confirm them.`
-            : `Found ${rooms.length} enclosed areas by detecting the walls in your image. Room names are suggestions based on size and your ${HOME_TYPES.find((h) => h.id === home)!.label} home type — please confirm them.`
-          : "No enclosed rooms could be detected automatically. Outline the rooms manually in the next step.";
+            : `Found ${rooms.length} enclosed areas. Review and confirm the room types in the next step.`
+          : "No rooms were detected. Try uploading a clearer floor plan.";
       } catch {
-        note = "Automatic wall detection failed. Outline the rooms manually in the next step.";
+        note = "Automatic wall detection failed. Try uploading a clearer floor plan.";
       }
       // A new upload replaces all previous geometry, calibration and layouts.
       setApartment(() => ({ ...base, rooms, autoScale: estimateScale(rooms, sqft), detection: rooms.length ? "manual" : "failed", detectionNote: note }));
@@ -76,18 +89,39 @@ export default function UploadStep() {
       step={1}
       title="Let's Understand Your Space"
       subtitle="Tell us about your apartment, then upload its floor plan (JPG or PNG)."
-      cta={{ label: "Continue", disabled: !ap.source || busy || (ap.source === "upload" && !infoOk), onPress: () => router.push("/plan/dimensions"), testID: "upload-continue-button" }}
+      cta={{
+        label: "Continue",
+        disabled: !ap.source || !ap.rooms.length || busy || (ap.source === "upload" && !infoOk),
+        onPress: () => {
+          if (ap.source === "upload" && (ap.sizeSqft !== sqft || ap.homeType !== homeType || ap.customHomeType !== customHomeType)) saveInfo();
+          router.push("/plan/dimensions");
+        },
+        testID: "upload-continue-button",
+      }}
     >
       <Card style={{ gap: spacing.md }} testID="apartment-info-card">
         <Text style={s.h}>1. Apartment details</Text>
         <Text style={s.k}>Apartment size (sq ft)</Text>
-        <TextInput testID="apartment-size-input" style={s.input} keyboardType="number-pad" value={size} placeholder="e.g. 650" placeholderTextColor={colors.muted} onChangeText={(t) => setSize(t.replace(/[^0-9]/g, ""))} onEndEditing={() => saveInfo(sqft, home)} onBlur={() => saveInfo(sqft, home)} />
+        <TextInput testID="apartment-size-input" style={s.input} keyboardType="number-pad" value={size} placeholder="e.g. 650" placeholderTextColor={colors.muted} onChangeText={(t) => setSize(t.replace(/[^0-9]/g, ""))} />
         <Text style={s.k}>Home type</Text>
         <View style={s.wrap}>
-          {HOME_TYPES.map((h) => (
-            <Chip key={h.id} label={h.label} selected={home === h.id} onPress={() => (setHome(h.id), saveInfo(sqft, h.id))} testID={`home-type-${h.id}`} />
+          {AVAILABLE_HOME_TYPES.map((h) => (
+            <Chip key={h.id} label={h.label} selected={home === h.id} onPress={() => setHome(h.id)} testID={`home-type-${h.id}`} />
           ))}
+          <Chip label="Other" selected={home === "other"} onPress={() => setHome("other")} testID="home-type-other" />
         </View>
+        {home === "other" ? (
+          <TextInput
+            accessibilityLabel="Custom home type"
+            testID="custom-home-type-input"
+            style={s.input}
+            value={customHome}
+            onChangeText={setCustomHome}
+            placeholder="Enter your home type"
+            placeholderTextColor={colors.muted}
+            maxLength={80}
+          />
+        ) : null}
       </Card>
 
       <Text style={s.h}>2. Floor plan</Text>
@@ -114,7 +148,7 @@ export default function UploadStep() {
         </Card>
       ) : null}
 
-      <Button kind="ghost" small label="No floor plan? Try a Demo apartment" icon="play-circle" onPress={() => (loadDemo(), setErr(null), setSize("650"), setHome("1b1b"))} testID="try-demo-button" />
+      <Button kind="ghost" small label="No floor plan? Try a Demo apartment" icon="play-circle" onPress={() => (loadDemo(), setErr(null), setSize("650"), setHome(null), setCustomHome(""))} testID="try-demo-button" />
       {ap.source === "sample" ? <Notice text="Demo mode: a structured sample 1B1B apartment (650 sq ft), not your upload." testID="demo-notice" /> : null}
     </WizardScaffold>
   );
