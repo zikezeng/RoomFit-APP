@@ -30,18 +30,19 @@ const ICONS: Partial<Record<CategoryId, string>> = {
   custom: "📦",
 };
 
-function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onDrag, onDrop, onCancel, testID, label }: {
+function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onDrag, onDrop, onCancel, onDragStateChange, testID, label }: {
   rect: { x: number; y: number; w: number; h: number };
   vw: number; vh: number; margin: number; pxWidth: number;
   onTap: () => void;
   onDrag: (dx: number, dy: number) => void;
   onDrop: (dx: number, dy: number) => void;
   onCancel: () => void;
+  onDragStateChange?: (active: boolean) => void;
   testID: string; label: string;
 }) {
   // Keep responder identity stable while visual positions update on each gesture frame.
-  const handlers = useRef({ onTap, onDrag, onDrop, onCancel, pxWidth, vw });
-  handlers.current = { onTap, onDrag, onDrop, onCancel, pxWidth, vw };
+  const handlers = useRef({ onTap, onDrag, onDrop, onCancel, onDragStateChange, pxWidth, vw });
+  handlers.current = { onTap, onDrag, onDrop, onCancel, onDragStateChange, pxWidth, vw };
   const convert = (dx: number, dy: number) => {
     const scale = handlers.current.pxWidth > 0 ? handlers.current.vw / handlers.current.pxWidth : 0;
     return { x: dx * scale, y: dy * scale };
@@ -52,18 +53,23 @@ function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onDrag, onDrop, onCa
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => handlers.current.onDragStateChange?.(true),
     onPanResponderMove: (_, gesture) => {
       const d = convertRef.current(gesture.dx, gesture.dy);
       handlers.current.onDrag(d.x, d.y);
     },
     onPanResponderRelease: (_, gesture) => {
+      handlers.current.onDragStateChange?.(false);
       if (Math.abs(gesture.dx) + Math.abs(gesture.dy) < 6) handlers.current.onTap();
       else {
         const d = convertRef.current(gesture.dx, gesture.dy);
         handlers.current.onDrop(d.x, d.y);
       }
     },
-    onPanResponderTerminate: () => handlers.current.onCancel(),
+    onPanResponderTerminate: () => {
+      handlers.current.onDragStateChange?.(false);
+      handlers.current.onCancel();
+    },
   }), []);
   return <View
     {...responder.panHandlers}
@@ -88,13 +94,14 @@ interface Props {
   selectedUid?: string | null;
   onPressItem?: (uid: string) => void;
   onMoveItem?: (uid: string, cx: number, cy: number) => void;
+  onDragStateChange?: (active: boolean) => void;
   editable?: boolean;
   showDims?: boolean;
   testID?: string;
 }
 
 /** Scaled top-down plan of ONE room (real polygon geometry, cm). */
-export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, editable = false, showDims = true, testID }: Props) {
+export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, onDragStateChange, editable = false, showDims = true, testID }: Props) {
   const { colors } = useTheme();
   const [pixelWidth, setPixelWidth] = useState(0);
   const [preview, setPreview] = useState<{ uid: string; cx: number; cy: number } | null>(null);
@@ -202,6 +209,7 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMov
                   onMoveItem(it.uid, original.cx + dx, original.cy + dy);
                 }}
                 onCancel={() => setPreview(null)}
+                onDragStateChange={onDragStateChange}
               />
             ) : (
               <Pressable
