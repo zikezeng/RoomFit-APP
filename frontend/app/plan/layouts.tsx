@@ -60,21 +60,18 @@ export default function LayoutsStep() {
     // Turning a piece changes its rectangular footprint. A wall-adjacent item
     // may need a small shift to remain inside the room after a 90-degree turn.
     const face = NEXT[selected.facing];
-    const offsets = [0, 10, -10, 20, -20, 30, -30, 40, -40, 50, -50, 60, -60, 80, -80, 100, -100];
+    const directions = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1],
+      [1, 1], [1, -1], [-1, 1], [-1, -1]];
     for (const radius of [0, 10, 20, 30, 40, 50, 60, 80, 100]) {
-      for (const dx of offsets) {
-        if (Math.abs(dx) > radius) continue;
-        for (const dy of offsets) {
-          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
-          const candidate: PlacedItem[] = state.plan.map(item =>
-            item.uid === selected.uid
-              ? { ...item, cx: item.cx + dx, cy: item.cy + dy, facing: face, wall: null }
-              : item);
-          if (validateLayout(geom, candidate, state.budget).valid) {
-            update({ plan: candidate });
-            setFeedback(null);
-            return;
-          }
+      for (const [vx, vy] of directions) {
+        const candidate: PlacedItem[] = state.plan.map(item =>
+          item.uid === selected.uid
+            ? { ...item, cx: item.cx + vx * radius, cy: item.cy + vy * radius, facing: face, wall: null }
+            : item);
+        if (validateLayout(geom, candidate, state.budget).valid) {
+          update({ plan: candidate });
+          setFeedback(null);
+          return;
         }
       }
     }
