@@ -57,15 +57,28 @@ export default function LayoutsStep() {
   };
   const rotate = () => {
     if (!selected || !geom || !state.plan) return;
-    const candidate: PlacedItem[] = state.plan.map(item =>
-      item.uid === selected.uid ? { ...item, facing: NEXT[item.facing], wall: null } : item);
-    const checked = validateLayout(geom, candidate, state.budget);
-    if (!checked.valid) {
-      setFeedback(checked.checks.find(c => !c.ok)?.detail ?? "This rotation is not allowed.");
-      return;
+    // Turning a piece changes its rectangular footprint. A wall-adjacent item
+    // may need a small shift to remain inside the room after a 90-degree turn.
+    const face = NEXT[selected.facing];
+    const offsets = [0, 10, -10, 20, -20, 30, -30, 40, -40, 50, -50, 60, -60, 80, -80, 100, -100];
+    for (const radius of [0, 10, 20, 30, 40, 50, 60, 80, 100]) {
+      for (const dx of offsets) {
+        if (Math.abs(dx) > radius) continue;
+        for (const dy of offsets) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const candidate: PlacedItem[] = state.plan.map(item =>
+            item.uid === selected.uid
+              ? { ...item, cx: item.cx + dx, cy: item.cy + dy, facing: face, wall: null }
+              : item);
+          if (validateLayout(geom, candidate, state.budget).valid) {
+            update({ plan: candidate });
+            setFeedback(null);
+            return;
+          }
+        }
+      }
     }
-    update({ plan: candidate });
-    setFeedback(null);
+    setFeedback("Not enough clear space to rotate this furniture. Try moving it farther from the wall first.");
   };
   const restore = () => {
     if (!chosen?.valid) return;
@@ -100,7 +113,7 @@ export default function LayoutsStep() {
         </Card>
       ) : (
         <>
-          <Text style={s.intro}>Drag furniture to move it. Tap a piece to rotate it.</Text>
+          <Text style={s.intro}>Drag a piece to move it. Tap furniture, then use Rotate 90° to turn it.</Text>
           <Card style={s.layoutCard} testID="layout-card-0">
             <ConfiguredPlan
               items={plan}
