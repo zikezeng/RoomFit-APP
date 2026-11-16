@@ -20,6 +20,7 @@ export default function LayoutsStep() {
   const s = useStyles();
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
+  const [draggingFurniture, setDraggingFurniture] = useState(false);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -88,6 +89,7 @@ export default function LayoutsStep() {
     <WizardScaffold
       step={7}
       title="Your Room Layout"
+      scrollEnabled={!draggingFurniture}
       cta={{
         label: "Continue",
         icon: "arrow-right",
@@ -120,6 +122,7 @@ export default function LayoutsStep() {
               selectedUid={selectedUid}
               onPressItem={uid => { setSelectedUid(uid); setFeedback(null); }}
               onMoveItem={commitPosition}
+              onDragStateChange={setDraggingFurniture}
             />
           </Card>
           {selected ? (
