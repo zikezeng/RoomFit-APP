@@ -30,29 +30,45 @@ const ICONS: Partial<Record<CategoryId, string>> = {
   custom: "📦",
 };
 
-function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onMove, testID, label }: {
+function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onDrag, onDrop, onCancel, testID, label }: {
   rect: { x: number; y: number; w: number; h: number };
   vw: number; vh: number; margin: number; pxWidth: number;
-  onTap: () => void; onMove: (dx: number, dy: number) => void;
+  onTap: () => void;
+  onDrag: (dx: number, dy: number) => void;
+  onDrop: (dx: number, dy: number) => void;
+  onCancel: () => void;
   testID: string; label: string;
 }) {
-  const handlers = useRef({ onTap, onMove, pxWidth, vw });
-  handlers.current = { onTap, onMove, pxWidth, vw };
+  // Keep responder identity stable while visual positions update on each gesture frame.
+  const handlers = useRef({ onTap, onDrag, onDrop, onCancel, pxWidth, vw });
+  handlers.current = { onTap, onDrag, onDrop, onCancel, pxWidth, vw };
+  const convert = (dx: number, dy: number) => {
+    const scale = handlers.current.pxWidth > 0 ? handlers.current.vw / handlers.current.pxWidth : 0;
+    return { x: dx * scale, y: dy * scale };
+  };
+  const convertRef = useRef(convert);
+  convertRef.current = convert;
   const responder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
+    onPanResponderMove: (_, gesture) => {
+      const d = convertRef.current(gesture.dx, gesture.dy);
+      handlers.current.onDrag(d.x, d.y);
+    },
     onPanResponderRelease: (_, gesture) => {
       if (Math.abs(gesture.dx) + Math.abs(gesture.dy) < 6) handlers.current.onTap();
-      else if (handlers.current.pxWidth > 0)
-        handlers.current.onMove(gesture.dx * handlers.current.vw / handlers.current.pxWidth,
-          gesture.dy * handlers.current.vw / handlers.current.pxWidth);
+      else {
+        const d = convertRef.current(gesture.dx, gesture.dy);
+        handlers.current.onDrop(d.x, d.y);
+      }
     },
+    onPanResponderTerminate: () => handlers.current.onCancel(),
   }), []);
   return <View
     {...responder.panHandlers}
     testID={testID}
-    accessibilityLabel={`Move ${label} by dragging`}
+    accessibilityLabel={`Drag ${label} to move it`}
     style={{ position: "absolute", left: `${((rect.x + margin) / vw) * 100}%`,
       top: `${((rect.y + margin) / vh) * 100}%`,
       width: `${(Math.max(rect.w, 34) / vw) * 100}%`,
@@ -81,15 +97,18 @@ interface Props {
 export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, editable = false, showDims = true, testID }: Props) {
   const { colors } = useTheme();
   const [pixelWidth, setPixelWidth] = useState(0);
+  const [preview, setPreview] = useState<{ uid: string; cx: number; cy: number } | null>(null);
   const W = g.width;
   const L = g.length;
   const M = Math.max(W, L) * 0.1;
   const fs = Math.max(W, L) / 34;
   const wallW = Math.max(W, L) / 60;
-  const ordered = [...items].sort((a, b) => Number(["rug", "mattress"].includes(a.category) ? 0 : 1) - Number(["rug", "mattress"].includes(b.category) ? 0 : 1)).sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug"));
+  const rendered = preview ? items.map(it => it.uid === preview.uid ? { ...it, cx: preview.cx, cy: preview.cy, wall: null } : it) : items;
+  const ordered = [...rendered].sort((a, b) => Number(["rug", "mattress"].includes(a.category) ? 0 : 1) - Number(["rug", "mattress"].includes(b.category) ? 0 : 1)).sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug"));
   const pts = g.poly.map((p) => `${p.x},${p.y}`).join(" ");
   const VW = W + 2 * M;
   const VH = L + 2 * M;
+  const originalByUid = new Map(items.map(it => [it.uid, it]));
   return (
     <View testID={testID} onLayout={e => setPixelWidth(e.nativeEvent.layout.width)} style={{ width: "100%", aspectRatio: VW / VH }}>
       <Svg width="100%" height="100%" viewBox={`${-M} ${-M} ${VW} ${VH}`}>
@@ -169,12 +188,20 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMov
             const p = getProduct(it.productId);
             if (!p) return null;
             const r = footprint(it, p, g);
+            const original = originalByUid.get(it.uid) ?? it;
             return editable && onMoveItem ? (
               <DragHandle key={`hit-${it.uid}`}
-                rect={r} vw={VW} vh={VH} margin={M} pxWidth={pixelWidth}
+                rect={footprint(original, p, g)} vw={VW} vh={VH} margin={M} pxWidth={pixelWidth}
                 testID={`${testID ?? "plan"}-item-${it.uid}`} label={p.name}
-                onTap={() => onPressItem?.(it.uid)}
-                onMove={(dx, dy) => onMoveItem(it.uid, it.cx + dx, it.cy + dy)}
+                onTap={() => { setPreview(null); onPressItem?.(it.uid); }}
+                onDrag={(dx, dy) => {
+                  setPreview({ uid: it.uid, cx: original.cx + dx, cy: original.cy + dy });
+                }}
+                onDrop={(dx, dy) => {
+                  setPreview(null);
+                  onMoveItem(it.uid, original.cx + dx, original.cy + dy);
+                }}
+                onCancel={() => setPreview(null)}
               />
             ) : (
               <Pressable
