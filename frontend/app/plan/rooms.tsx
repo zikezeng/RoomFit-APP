@@ -14,7 +14,8 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
   const router = useRouter();
-  const { state, selectRoom, startRooms, setApartmentBudget } = usePlan();
+  const { state, selectRoom, startRooms, setApartmentBudget, setRoomBudgets } = usePlan();
+  const [roomDrafts, setRoomDrafts] = useState<Record<string, string>>({});
   const [budgetDraft, setBudgetDraft] = useState(String(state.apartmentBudget));
   const [editingBudget, setEditingBudget] = useState(false);
   const budgetNumber = Number(budgetDraft);
@@ -31,13 +32,45 @@ export default function RoomsStep() {
   const ap = state.apartment;
   const rooms = [...ap.rooms].sort((a, b) => roomRank(a.kind) - roomRank(b.kind));
   const selectedCount = state.selectedRoomIds.length;
-  const canContinue = validBudget && selectedCount > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
+  const canContinueRooms = selectedCount > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
   // Preview the same room-level allocation that will be saved when continuing.
   // This also updates immediately when rooms are selected or the total is edited.
   const split = rebalanceRoomBudgets({
     ...state,
     apartmentBudget: validBudget ? Math.round(budgetNumber) : state.apartmentBudget,
   });
+  const selectedRooms = rooms.filter(room => state.selectedRoomIds.includes(room.id));
+  const roomAmount = (id: string) => {
+    const draft = roomDrafts[id];
+    return draft == null ? split.roomProgress[id]?.budget ?? 0 : Number(draft);
+  };
+  const roomsComplete = selectedRooms.every(room => {
+    const draft = roomDrafts[room.id];
+    return draft == null || (draft.length > 0 && Number.isFinite(Number(draft)));
+  });
+  const allocated = selectedRooms.reduce((sum, room) => sum + roomAmount(room.id), 0);
+  const overAllocated = validBudget && allocated > budgetNumber;
+  const canContinue = canContinueRooms && validBudget && roomsComplete && !overAllocated;
+  const saveRoomBudget = (id: string) => {
+    const draft = roomDrafts[id];
+    if (draft == null) return;
+    if (!draft.length || !Number.isFinite(Number(draft)) || allocated > budgetNumber || !validBudget) return;
+    setRoomBudgets({ [id]: Math.round(Number(draft)) });
+    setRoomDrafts(previous => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+  };
+  const saveAllRoomBudgets = () => {
+    const changes: Record<string, number> = {};
+    for (const room of selectedRooms) {
+      const draft = roomDrafts[room.id];
+      if (draft != null) changes[room.id] = Math.round(Number(draft));
+    }
+    if (Object.keys(changes).length) setRoomBudgets(changes);
+    setRoomDrafts({});
+  };
 
   return (
     <WizardScaffold
@@ -45,7 +78,7 @@ export default function RoomsStep() {
       title="Which Rooms Would You Like to Furnish?"
       subtitle="Choose all the rooms you want to furnish. Tap the floor plan or the list to select multiple rooms."
       keyboardAware
-      cta={{ label: selectedCount ? `Furnish ${selectedCount} ${selectedCount === 1 ? "room" : "rooms"}` : "Select rooms", disabled: !canContinue, onPress: () => { commitBudget(); startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
+      cta={{ label: selectedCount ? `Furnish ${selectedCount} ${selectedCount === 1 ? "room" : "rooms"}` : "Select rooms", disabled: !canContinue, onPress: () => { commitBudget(); saveAllRoomBudgets(); startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
     >
       <PlanCanvas
         ap={ap}
@@ -98,15 +131,38 @@ export default function RoomsStep() {
         {selectedCount > 0 ? (
           <View style={s.roomBudgetList} testID="rooms-budget-by-room">
             <Text style={s.roomBudgetHeading}>Budget by room</Text>
-            {rooms.filter(room => state.selectedRoomIds.includes(room.id)).map(room => (
+            {selectedRooms.map(room => (
               <View key={room.id} style={s.roomBudgetRow}>
                 <Text style={s.roomBudgetName}>{room.label}</Text>
-                <Text style={s.roomBudgetAmount} testID={`room-budget-${room.id}`}>
-                  {money(split.roomProgress[room.id]?.budget ?? 0)}
-                </Text>
+                <View style={s.roomInputBox}>
+                  <Text style={s.roomDollar}>$</Text>
+                  <TextInput
+                    testID={`room-budget-${room.id}`}
+                    accessibilityLabel={`${room.label} budget in dollars`}
+                    style={s.roomBudgetInput}
+                    keyboardType="number-pad"
+                    selectTextOnFocus
+                    value={roomDrafts[room.id] ?? String(split.roomProgress[room.id]?.budget ?? 0)}
+                    onChangeText={text => setRoomDrafts(previous => ({ ...previous, [room.id]: text.replace(/[^0-9]/g, "") }))}
+                    onBlur={() => saveRoomBudget(room.id)}
+                    onSubmitEditing={() => saveRoomBudget(room.id)}
+                  />
+                </View>
               </View>
             ))}
-            <Text style={s.budgetHint}>Automatically allocated across your selected rooms.</Text>
+            <View style={s.roomBudgetRow}>
+              <Text style={s.budgetHint}>Total assigned</Text>
+              <Text style={s.roomBudgetAmount}>{money(allocated)}</Text>
+            </View>
+            <View style={s.roomBudgetRow}>
+              <Text style={s.budgetHint}>Unallocated budget</Text>
+              <Text style={s.roomBudgetAmount}>{money(validBudget ? budgetNumber - allocated : 0)}</Text>
+            </View>
+            {!roomsComplete ? <Notice tone="error" text="Enter a valid amount for every selected room." /> : null}
+            {overAllocated ? (
+              <Notice tone="error" text="Room budgets cannot add up to more than the total apartment budget. Reduce a room amount or increase the total." testID="rooms-budget-over-limit" />
+            ) : null}
+            <Text style={s.budgetHint}>Edit each room budget. Unallocated funds can remain available.</Text>
           </View>
         ) : null}
       </Card>
@@ -121,6 +177,9 @@ const useStyles = makeStyles((c) => ({
   roomBudgetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md },
   roomBudgetName: { flex: 1, fontFamily: fonts.text, fontSize: 14, color: c.onSurface },
   roomBudgetAmount: { fontFamily: fonts.text, fontWeight: "700", fontSize: 16, color: c.brandPrimary },
+  roomInputBox: { flexDirection: "row", alignItems: "center", borderColor: c.border, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.sm, backgroundColor: c.surfaceSecondary },
+  roomDollar: { fontFamily: fonts.text, fontSize: 17, color: c.muted },
+  roomBudgetInput: { width: 90, textAlign: "right", fontFamily: fonts.text, fontSize: 17, fontWeight: "700", color: c.onSurface, minHeight: 40, paddingVertical: 4 },
   budgetTitle: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
   budgetHint: { fontFamily: fonts.text, fontSize: 13, color: c.muted },
   budgetInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: c.border, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: c.surfaceSecondary },
