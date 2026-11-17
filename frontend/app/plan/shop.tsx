@@ -23,7 +23,49 @@ export default function ShopStep() {
   const [uid, setUid] = useState<string | null>(null);
   const plan = state.plan;
   const v = plan && geom ? validatePlan(state, plan) : null;
-  const chosen = plan ? plan.filter((it) => state.realSelections[it.uid]).length : 0;
+  const budget = totalBudget(state);
+
+  // Budget follows what the user has really chosen:
+  //  - a chosen real product counts at its real price;
+  //  - the user's own custom items count at the price they entered;
+  //  - positions with nothing chosen yet count as $0 (their demo price is only a planning estimate).
+  let chosen = 0;
+  let unpriced = 0;
+  let spent = 0;
+  let toChoose = 0;
+  (plan ?? []).forEach((it) => {
+    const real = state.realSelections[it.uid];
+    const p = getProduct(it.productId);
+    if (real) {
+      chosen += 1;
+      if (real.price !== null && real.price !== undefined) spent += real.price;
+      else unpriced += 1;
+    } else if (p.category === "custom") {
+      spent += p.price;
+    } else {
+      toChoose += 1;
+    }
+  });
+  spent = Math.round(spent * 100) / 100;
+  const remaining = budget - spent;
+  const overBudget = remaining < 0;
+  const budgetNote = [
+    toChoose > 0
+      ? overBudget
+        ? `${toChoose} ${toChoose === 1 ? "piece" : "pieces"} still to choose`
+        : `${toChoose} ${toChoose === 1 ? "piece" : "pieces"} still to choose · about ${money(Math.floor(remaining / toChoose))} each`
+      : "All pieces chosen",
+    unpriced > 0 ? `${unpriced} chosen without a listed price (not counted)` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  // Room checks (fit, overlaps, door, walkways) still come from the layout; the budget check uses real prices.
+  const roomFails = v ? v.checks.filter((c) => !c.ok && !c.id.endsWith(":budget")) : [];
+  const allOk = roomFails.length === 0 && !overBudget;
+  const statusText = allOk
+    ? `Layout fits · no overlaps, door & walkways clear · ${money(spent)} of ${money(budget)} used`
+    : [...roomFails.map((c) => c.detail), overBudget ? `Over budget by ${money(-remaining)} — pick a cheaper product or raise the budget.` : null].filter(Boolean).join(" ");
 
   // Name each layout position by furniture type ("Sofa", "Dining chair 2"…).
   const slotLabels: Record<string, string> = {};
@@ -45,7 +87,16 @@ export default function ShopStep() {
       title="Shop Your Room"
       subtitle="Tap a piece on the plan, or a Choose button below, to pick a real product to buy for that spot."
       cta={plan ? { label: "View final plan", icon: "check", onPress: () => router.push("/plan/results"), testID: "shop-continue-button" } : undefined}
-      header={v ? <BudgetBar total={v.total} budget={totalBudget(state)} /> : undefined}
+      header={
+        v && plan ? (
+          <View style={{ gap: 4 }}>
+            <BudgetBar total={spent} budget={budget} />
+            <Text style={s.budgetNote} testID="shop-budget-note">
+              {budgetNote}
+            </Text>
+          </View>
+        ) : undefined
+      }
     >
       {!plan || !v || !geom ? (
         <View style={{ gap: spacing.md }}>
@@ -57,9 +108,9 @@ export default function ShopStep() {
           <Card>
             <ConfiguredPlan items={plan} selectedUid={uid} onPressItem={setUid} testID="shop-floorplan-svg" />
             <View style={s.status}>
-              <Feather name={v.valid ? "check-circle" : "alert-circle"} size={14} color={v.valid ? colors.success : colors.error} />
+              <Feather name={allOk ? "check-circle" : "alert-circle"} size={14} color={allOk ? colors.success : colors.error} />
               <Text style={s.caption} testID="shop-validity">
-                {v.valid ? "Layout valid · fits, no overlaps, door & walkways clear, within budget" : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}
+                {statusText}
               </Text>
             </View>
           </Card>
@@ -135,6 +186,7 @@ export default function ShopStep() {
 const useStyles = makeStyles((c) => ({
   h: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
   hRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: spacing.md },
+  budgetNote: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   count: { fontFamily: fonts.text, fontSize: 13, color: c.muted },
   itemEmpty: { borderStyle: "dashed", borderColor: c.borderStrong },
   chooseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: c.brandPrimary },
