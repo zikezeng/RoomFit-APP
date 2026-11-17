@@ -156,7 +156,15 @@ export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<
   if (saved.plan?.some(item => item.roomId)) {
     for (const id of s.selectedRoomIds) {
       const config = configsOf(s)[id] ?? configOf(s);
-      s.roomProgress[id] = { ...config, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: saved.plan.filter(item => item.roomId === id) };
+      s.roomProgress[id] = {
+        ...config,
+        roomKind: config.needsKind,
+        layouts: null,
+        seed: 0,
+        selectedLayoutId: null,
+        plan: saved.plan.filter(item => item.roomId === id),
+        realSelections: s.roomProgress[id]?.realSelections ?? {},
+      };
     }
     s.plan = s.roomProgress[s.selectedRoomId ?? ""]?.plan ?? null;
     s.layouts = null;
@@ -165,7 +173,7 @@ export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<
   if (!s.selectedRoomIds.includes(s.selectedRoomId ?? "")) {
     const first = s.selectedRoomIds[0];
     s.selectedRoomId = null;
-    return first ? activateRoom(s, first) : { ...s, roomKind: null, layouts: null, selectedLayoutId: null, plan: null };
+    return first ? activateRoom(s, first) : { ...s, roomKind: null, layouts: null, selectedLayoutId: null, plan: null, realSelections: {} };
   }
   return saveRoom(s);
 }
@@ -243,7 +251,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         n.layouts = null;
         n.selectedLayoutId = null;
       }
-      if (invalidate !== "none") n.plan = null;
+      if (invalidate !== "none") {
+        n.plan = null;
+        n.realSelections = {};
+      }
       return n;
     });
   }, [setState]);
@@ -255,7 +266,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       const keepRoom = apartment.rooms.some((r) => r.id === s.selectedRoomId);
       return { ...s, apartment, selectedRoomId: keepRoom ? s.selectedRoomId : null,
         selectedRoomIds: s.selectedRoomIds.filter(id => apartment.rooms.some(r => r.id === id && FURNISHABLE.includes(r.kind))),
-        roomProgress: {}, layouts: null, selectedLayoutId: null, plan: null };
+        roomProgress: {}, layouts: null, selectedLayoutId: null, plan: null, realSelections: {} };
     });
   }, [setState]);
 
