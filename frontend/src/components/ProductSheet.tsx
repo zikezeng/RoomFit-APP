@@ -14,7 +14,7 @@ import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: () => void }) {
-  const { state, swap } = usePlan();
+  const { state, swap, selectRealProduct, clearRealProduct } = usePlan();
   const insets = useSafeAreaInsets();
   const s = useStyles();
   const { colors } = useTheme();
@@ -27,6 +27,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const geom = buildGeom(state.apartment, roomId);
   const budget = configsOf(state)[roomId!]?.budget ?? state.budget;
   const p = item ? getProduct(item.productId) : null;
+  const selectedReal = uid ? state.realSelections[uid] : undefined;
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
@@ -80,6 +81,18 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
       const fails = r.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ");
       setMsg({ tone: "error", text: `${np.name} can't replace this piece: ${fails} Choose one of the options marked "Fits".` });
     }
+  };
+
+  const chooseRealProduct = (rp: RealShoppingProduct) => {
+    if (!item || !p) return;
+    selectRealProduct(item.uid, { ...rp, category: p.category });
+    setMsg({ tone: "success", text: `Selected ${rp.title} for this layout position. Its shopping details will carry into your final plan and 3D handoff.` });
+  };
+
+  const removeRealProduct = () => {
+    if (!item) return;
+    clearRealProduct(item.uid);
+    setMsg({ tone: "success", text: "Removed the real product choice. This position is back to the layout planning item." });
   };
 
   return (
@@ -149,32 +162,56 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
               {!realLoading && !realError && !realProducts.length ? (
                 <Text style={s.caption}>No live shopping matches found right now.</Text>
               ) : null}
-              {realProducts.map((rp, i) => (
-                <View key={rp.id + i} style={s.realCard} testID={`real-product-${i}`}>
-                  {rp.image ? (
-                    <Image source={{ uri: rp.image }} style={s.realImage} contentFit="cover" transition={150} />
-                  ) : (
-                    <ProductSwatch category={p.category} style={p.styles[0]} size={72} />
-                  )}
-                  <View style={{ flex: 1, gap: 3 }}>
-                    <Text style={s.altName} numberOfLines={2}>{rp.title}</Text>
-                    <Text style={s.caption}>{rp.retailer}</Text>
-                    <Text style={s.realPrice}>{rp.price_text ?? (rp.price !== null ? money(rp.price) : "See price")}</Text>
-                    {rp.rating ? (
-                      <Text style={s.caption}>★ {rp.rating}{rp.reviews ? ` · ${rp.reviews.toLocaleString()} reviews` : ""}</Text>
-                    ) : null}
-                    {rp.delivery ? <Text style={s.caption}>{rp.delivery}</Text> : null}
+              {realProducts.map((rp, i) => {
+                const isSelected = selectedReal?.id === rp.id && selectedReal?.url === rp.url;
+                return (
+                  <View key={rp.id + i} style={[s.realCard, isSelected && s.realCardSelected]} testID={`real-product-${i}`}>
+                    {rp.image ? (
+                      <Image source={{ uri: rp.image }} style={s.realImage} contentFit="cover" transition={150} />
+                    ) : (
+                      <ProductSwatch category={p.category} style={p.styles[0]} size={72} />
+                    )}
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={s.altName} numberOfLines={2}>{rp.title}</Text>
+                      <Text style={s.caption}>{rp.retailer}</Text>
+                      <Text style={s.realPrice}>{rp.price_text ?? (rp.price !== null ? money(rp.price) : "See price")}</Text>
+                      {rp.rating ? (
+                        <Text style={s.caption}>★ {rp.rating}{rp.reviews ? ` · ${rp.reviews.toLocaleString()} reviews` : ""}</Text>
+                      ) : null}
+                      {rp.delivery ? <Text style={s.caption}>{rp.delivery}</Text> : null}
+                      {isSelected ? <Text style={s.selectedText}>✓ Selected for this layout</Text> : null}
+                    </View>
+                    <View style={s.realActions}>
+                      <Button
+                        small
+                        kind={isSelected ? "primary" : "secondary"}
+                        label={isSelected ? "Selected" : "Select product"}
+                        icon={isSelected ? "check" : undefined}
+                        onPress={() => chooseRealProduct(rp)}
+                        testID={`real-product-select-${i}`}
+                      />
+                      <Button
+                        small
+                        kind="ghost"
+                        label={rp.direct_retailer ? "Shop now" : "Buying options"}
+                        icon="external-link"
+                        onPress={() => Linking.openURL(rp.url)}
+                        testID={`real-product-link-${i}`}
+                      />
+                    </View>
                   </View>
-                  <Button
-                    small
-                    kind="secondary"
-                    label={rp.direct_retailer ? "Shop now" : "View buying options"}
-                    icon="external-link"
-                    onPress={() => Linking.openURL(rp.url)}
-                    testID={`real-product-link-${i}`}
-                  />
-                </View>
-              ))}
+                );
+              })}
+              {selectedReal ? (
+                <Button
+                  small
+                  kind="ghost"
+                  label="Clear selected real product"
+                  icon="x"
+                  onPress={removeRealProduct}
+                  testID="clear-real-product"
+                />
+              ) : null}
             </View>
 
             {msg ? <Notice tone={msg.tone} text={msg.text} testID="swap-result-message" /> : null}
@@ -227,8 +264,11 @@ const useStyles = makeStyles((c) => ({
   section: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
   sectionBlock: { gap: spacing.md },
   realCard: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
+  realCardSelected: { borderColor: c.success, borderWidth: 2 },
   realImage: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: c.surfaceTertiary },
   realPrice: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.brandPrimary },
+  selectedText: { fontFamily: fonts.text, fontSize: 12, fontWeight: "700", color: c.success },
+  realActions: { gap: spacing.xs, alignItems: "stretch" },
   alt: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
   altName: { fontFamily: fonts.text, fontSize: 14, fontWeight: "600", color: c.onSurface },
 }));

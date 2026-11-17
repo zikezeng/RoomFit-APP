@@ -58,6 +58,25 @@ export interface Product {
   description: string;
 }
 
+/** Real product chosen by the user in Step 8.
+ * Kept separate from Product/PlacedItem because the layout solver still relies on
+ * the proxy product's verified dimensions.
+ */
+export interface RealProductSelection {
+  id: string;
+  category: CategoryId;
+  title: string;
+  price: number | null;
+  price_text: string | null;
+  retailer: string;
+  url: string;
+  image: string | null;
+  rating: number | null;
+  reviews: number | null;
+  delivery: string | null;
+  direct_retailer: boolean;
+}
+
 export interface Pt {
   x: number;
   y: number;
