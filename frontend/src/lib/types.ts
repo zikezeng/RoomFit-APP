@@ -75,6 +75,21 @@ export interface RealProductSelection {
   reviews: number | null;
   delivery: string | null;
   direct_retailer: boolean;
+  /** Token for looking the product up again (size, colour). Missing on products saved before this existed. */
+  page_token?: string | null;
+  /** Filled after the user selects the product: real size and colour, when they could be found. */
+  details?: RealProductDetails;
+}
+
+/** Real-world facts about a selected product. Every size is cm; null = not found ("size unknown"). */
+export interface RealProductDetails {
+  status: "loading" | "ok" | "unavailable";
+  width: number | null;
+  depth: number | null;
+  height: number | null;
+  source: "specs" | "description" | "title" | null;
+  color: string | null; // main colour read from the product photo (#rrggbb)
+  colorName: string | null; // colour as the shop names it
 }
 
 export interface Pt {

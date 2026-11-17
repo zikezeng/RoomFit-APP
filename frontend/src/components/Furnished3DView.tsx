@@ -181,27 +181,35 @@ const fail = (text) => { document.getElementById("msg").textContent = text; docu
   const legs = (g, w, d, h, material, inset, t) => { const s = t || 0.045; [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((k) => box(g, s, h, s, material, k[0] * (w / 2 - inset - s / 2), 0, k[1] * (d / 2 - inset - s / 2))); };
 
   const seating = (g, it, seats) => {
-    const w = it.w, d = it.d, h = it.h, body = mat(it.color, -0.1), cushion = mat(it.color, 0.18), dark = mat(P.dark, 0.25);
-    const arm = Math.min(0.2, w * 0.12), backT = Math.min(0.24, d * 0.27), seatH = Math.min(0.42, h * 0.52), lg = 0.07;
-    legs(g, w, d, lg, dark, 0.03);
-    box(g, w, seatH - lg - 0.12, d, body, 0, lg, 0);
-    box(g, w, h - lg, backT, body, 0, lg, -d / 2 + backT / 2);
-    [-1, 1].forEach((k) => box(g, arm, seatH + 0.16 - lg, d - backT, body, k * (w / 2 - arm / 2), lg, backT / 2));
+    const body = mat(it.color, -0.1), cushion = mat(it.color, 0.16), dark = mat(P.dark, 0.25), h = it.h, lg = 0.07;
+    seats = it.seats || seats;
+    // A sectional keeps its footprint: a normal sofa along the back plus a chaise down the left side.
+    const w = it.w, full = it.d, d = it.sectional ? full * 0.56 : full, z0 = it.sectional ? -(full - d) / 2 : 0;
+    const arm = Math.min(0.2, w * 0.12), backT = Math.min(0.24, d * 0.27), seatH = Math.min(0.42, h * 0.52);
+    legs(g, w, full, lg, dark, 0.03);
+    box(g, w, seatH - lg - 0.12, d, body, 0, lg, z0);
+    box(g, w, h - lg, backT, body, 0, lg, z0 - d / 2 + backT / 2);
+    [-1, 1].forEach((k) => box(g, arm, seatH + 0.16 - lg, d - backT, body, k * (w / 2 - arm / 2), lg, z0 + backT / 2));
     const inner = w - 2 * arm, cw = inner / seats;
     for (let i = 0; i < seats; i++) {
       const x = -inner / 2 + cw * (i + 0.5);
-      box(g, cw - 0.02, 0.13, d - backT - 0.03, cushion, x, seatH - 0.12, backT / 2);
-      const bc = box(g, cw - 0.04, Math.max(0.2, h - seatH - 0.08), 0.13, cushion, x, seatH, -d / 2 + backT + 0.07); bc.rotation.x = -0.12;
+      box(g, cw - 0.02, 0.13, d - backT - 0.03, cushion, x, seatH - 0.12, z0 + backT / 2);
+      const bc = box(g, cw - 0.04, Math.max(0.2, h - seatH - 0.08), 0.13, cushion, x, seatH, z0 - d / 2 + backT + 0.07); bc.rotation.x = -0.12;
+    }
+    if (it.sectional) {
+      const cwid = Math.max(0.6, Math.min(w * 0.4, 0.95)), cx = -w / 2 + arm + cwid / 2, clen = full - d;
+      box(g, cwid, seatH - lg - 0.12, clen, body, cx, lg, full / 2 - clen / 2);
+      box(g, cwid - 0.02, 0.13, clen, cushion, cx, seatH - 0.12, full / 2 - clen / 2);
     }
   };
   builders.sofa = (g, it) => seating(g, it, it.w > 1.7 ? 3 : it.w > 1.15 ? 2 : 1);
   builders.armchair = (g, it) => seating(g, it, 1);
   builders.bench = (g, it) => { const wood = mat(P.woodDark, -0.05); legs(g, it.w, it.d, it.h - 0.07, wood, 0.04); box(g, it.w, 0.07, it.d, mat(it.color, 0.1), 0, it.h - 0.07, 0); };
-  builders.ottoman = (g, it) => { const m = mat(it.color, 0.05); if (Math.abs(it.w - it.d) < 0.08) cyl(g, it.w / 2, it.w / 2 * 0.94, it.h, m, 0, 0, 0); else box(g, it.w, it.h, it.d, m, 0, 0, 0); };
+  builders.ottoman = (g, it) => { const m = mat(it.color, 0.05); if (it.round || Math.abs(it.w - it.d) < 0.08) cyl(g, it.w / 2, it.w / 2 * 0.94, it.h, m, 0, 0, 0); else box(g, it.w, it.h, it.d, m, 0, 0, 0); };
 
   const table = (g, it, opt) => {
     const top = mat(it.color, 0.08), leg = mat(it.color, -0.35), tt = 0.04, o = opt || {};
-    if (o.round) { cyl(g, it.w / 2, it.w / 2, tt, top, 0, it.h - tt, 0); cyl(g, 0.025, 0.025, it.h - tt - 0.02, leg, 0, 0.02, 0); cyl(g, it.w * 0.3, it.w * 0.32, 0.02, leg, 0, 0, 0); return; }
+    if (o.round || it.round) { const rr = Math.min(it.w, it.d) / 2; cyl(g, rr, rr, tt, top, 0, it.h - tt, 0); cyl(g, 0.025, 0.025, it.h - tt - 0.02, leg, 0, 0.02, 0); cyl(g, it.w * 0.3, it.w * 0.32, 0.02, leg, 0, 0, 0); return; }
     box(g, it.w, tt, it.d, top, 0, it.h - tt, 0);
     legs(g, it.w, it.d, it.h - tt, leg, 0.03, o.leg);
     if (o.shelf) box(g, it.w - 0.14, 0.02, it.d - 0.14, top, 0, it.h * 0.28, 0);
@@ -276,7 +284,10 @@ const fail = (text) => { document.getElementById("msg").textContent = text; docu
     cyl(g, r * 0.75, r * 0.8, 0.03, metal, 0, 0, 0); cyl(g, 0.014, 0.014, it.h - 0.28, metal, 0, 0.03, 0);
     cyl(g, Math.max(0.09, r * 0.6), Math.max(0.14, r * 0.95), 0.28, new THREE.MeshStandardMaterial({ color: col(P.lamp, 0.55), emissive: col(P.lamp, 0.2), emissiveIntensity: 0.55, roughness: 0.9 }), 0, it.h - 0.28, 0);
   };
-  builders.rug = (g, it) => { box(g, it.w, 0.012, it.d, mat(it.color, -0.12), 0, 0.001, 0, true); box(g, it.w - 0.24, 0.014, it.d - 0.24, mat(it.color, 0.2), 0, 0.001, 0, true); };
+  builders.rug = (g, it) => {
+    if (it.round) { const rr = Math.min(it.w, it.d) / 2; const a1 = cyl(g, rr, rr, 0.012, mat(it.color, -0.12), 0, 0.001, 0); a1.castShadow = false; const a2 = cyl(g, rr - 0.12, rr - 0.12, 0.014, mat(it.color, 0.2), 0, 0.001, 0); a2.castShadow = false; return; }
+    box(g, it.w, 0.012, it.d, mat(it.color, -0.12), 0, 0.001, 0, true); box(g, it.w - 0.24, 0.014, it.d - 0.24, mat(it.color, 0.2), 0, 0.001, 0, true);
+  };
   builders.floor_mirror = (g, it) => {
     const lean = new THREE.Group(); lean.position.set(0, 0, -it.d / 2 + 0.02); lean.rotation.x = -0.1; g.add(lean);
     box(lean, it.w, it.h, 0.035, mat(P.woodDark, -0.1), 0, 0, 0.02);

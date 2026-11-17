@@ -1,5 +1,5 @@
 import { CATEGORY_MAP, STYLE_LABEL } from "./catalog";
-import { CategoryId, MoodId, StyleId } from "./types";
+import { CategoryId, MoodId, RealProductDetails, StyleId } from "./types";
 
 const API = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -15,6 +15,7 @@ export interface RealShoppingProduct {
   reviews: number | null;
   delivery: string | null;
   direct_retailer: boolean;
+  page_token?: string | null;
 }
 
 interface SearchResponse {
@@ -54,4 +55,23 @@ export async function searchRealProducts(input: {
   }
 
   return (body as SearchResponse).products ?? [];
+}
+
+export const NO_DETAILS: RealProductDetails = { status: "unavailable", width: null, depth: null, height: null, source: null, color: null, colorName: null };
+export const LOADING_DETAILS: RealProductDetails = { ...NO_DETAILS, status: "loading" };
+
+/** Ask the server for one selected product's real size and main colour (one extra lookup, cached). */
+export async function fetchProductDetails(pageToken: string): Promise<RealProductDetails> {
+  if (!API) throw new Error("RoomFit backend URL is not configured.");
+  const res = await fetch(`${API}/api/products/detail?token=${encodeURIComponent(pageToken)}`);
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body) {
+    const detail = body?.detail;
+    throw new Error(typeof detail === "string" ? detail : `Product lookup failed (${res.status}).`);
+  }
+  const num = (v: unknown) => (typeof v === "number" && isFinite(v) && v > 0 ? v : null);
+  const d = body.dimensions ?? {};
+  const source = d.source === "specs" || d.source === "description" || d.source === "title" ? d.source : null;
+  const color = typeof body.color === "string" && /^#[0-9a-f]{6}$/i.test(body.color) ? body.color : null;
+  return { status: "ok", width: num(d.width), depth: num(d.depth), height: num(d.height), source, color, colorName: typeof body.color_name === "string" ? body.color_name : null };
 }

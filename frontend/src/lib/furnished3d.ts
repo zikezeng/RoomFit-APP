@@ -8,6 +8,7 @@
 // The viewer (Furnished3DView) only draws what this file hands it. All lengths are in cm.
 import { bbox, buildGeom, roomScale, scaleOf } from "./apartment";
 import { CATEGORY_MAP, getProduct } from "./catalog";
+import { fitCheck, hasRealSize, productColor, shapeHints, sizeText } from "./product-fit";
 import { footprint } from "./solver";
 import { CategoryId, Facing, PlacedItem, Pt, RealProductSelection, RoomKind } from "./types";
 import type { PlanState } from "../state/plan-store";
@@ -30,6 +31,17 @@ export interface Scene3DItem {
   /** Rotation about the vertical axis, radians. 0 = front faces "down" on the 2D plan. */
   rot: number;
   color: string;
+  /** Space the layout keeps for this piece (cm). Equal to w/d unless the real product's size is known. */
+  spaceW: number;
+  spaceD: number;
+  /** True when w/d/h come (at least partly) from the real product's size. */
+  realSize: boolean;
+  sizeText: string | null;
+  fit: "ok" | "warn" | "unknown" | null;
+  fitText: string | null;
+  seats?: number;
+  sectional?: boolean;
+  round?: boolean;
   status: "real" | "custom" | "unchosen";
   title: string | null;
   image: string | null;
@@ -64,6 +76,7 @@ export interface Scene3DColors {
 }
 
 const ROT: Record<Facing, number> = { down: 0, right: Math.PI / 2, up: Math.PI, left: -Math.PI / 2 };
+const FRONT: Record<Facing, Pt> = { down: { x: 0, y: 1 }, up: { x: 0, y: -1 }, right: { x: 1, y: 0 }, left: { x: -1, y: 0 } };
 
 /** Layout and real choices of one room, whether it is the room being edited or one finished earlier. */
 export function roomPlanOf(state: PlanState, roomId: string): { plan: PlacedItem[]; real: Record<string, RealProductSelection> } {
@@ -92,10 +105,34 @@ function itemsOfRoom(state: PlanState, roomId: string, colors: Scene3DColors, pl
     const custom = p.category === "custom";
     const label = custom ? p.name : CATEGORY_MAP[p.category].label + (totals[it.category] > 1 ? ` ${seen[it.category]}` : "");
     const sel = real[it.uid];
-    const base = { uid: it.uid, roomId, category: p.category, label, x: c.x, z: c.y, w: p.width * k, d: p.depth * k, h: p.height * k, rot: ROT[it.facing], color: colors.item(p.category) };
+    const base = {
+      uid: it.uid, roomId, category: p.category, label, x: c.x, z: c.y, w: p.width * k, d: p.depth * k, h: p.height * k, rot: ROT[it.facing], color: colors.item(p.category),
+      spaceW: p.width, spaceD: p.depth, realSize: false, sizeText: null, fit: null, fitText: null,
+    };
     if (sel) {
       const priceText = sel.price_text ?? (sel.price !== null && sel.price !== undefined ? money(sel.price) : null);
-      return { ...base, status: "real" as const, title: sel.title, image: sel.image, priceText, retailer: sel.retailer, url: sel.url };
+      const dt = sel.details;
+      const out: Scene3DItem = { ...base, ...shapeHints(p.category, sel.title), status: "real", title: sel.title, image: sel.image, priceText, retailer: sel.retailer, url: sel.url };
+      out.color = productColor(sel) ?? base.color;
+      const fit = fitCheck(dt, { width: p.width, depth: p.depth });
+      out.sizeText = sizeText(dt);
+      out.fit = fit.level;
+      out.fitText = fit.text;
+      if (dt && hasRealSize(dt)) {
+        // Draw the product at its real size where we know it. A piece that stands against a wall keeps
+        // its back on that wall, so a deeper product grows into the room, the way it would in real life.
+        const depth = dt.depth ?? p.depth;
+        out.w = (dt.width ?? p.width) * k;
+        out.d = depth * k;
+        out.h = (dt.height ?? p.height) * k;
+        out.realSize = true;
+        if (it.wall !== null) {
+          const push = ((depth - p.depth) / 2) * k;
+          out.x += FRONT[it.facing].x * push;
+          out.z += FRONT[it.facing].y * push;
+        }
+      }
+      return out;
     }
     if (custom) return { ...base, status: "custom" as const, title: p.name, image: null, priceText: money(p.price), retailer: null, url: null };
     return { ...base, status: "unchosen" as const, title: null, image: null, priceText: null, retailer: null, url: null };

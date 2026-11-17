@@ -9,6 +9,8 @@ Routes (all under /api, like the original RoomFit backend):
   POST /api/floorplan/segment  rooms as polygons (0-1000 normalised) — same shape the app's
                                upload step already uses, so it replaces the old OpenCV endpoint
   POST /api/floorplan/3d       3D model (.glb, base64) + rooms/doors/windows in metres
+  GET  /api/products/search    live shopping results for Step 8 (SerpAPI key stays on this server)
+  GET  /api/products/detail    size and main colour of one selected product
 """
 
 import base64
@@ -29,6 +31,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from product_details import build_details
 from roomfit_3d import Recognizer, Settings, build_scene, extract_geometry, geometry_to_json
 
 ROOT = Path(__file__).parent
@@ -174,6 +177,8 @@ def product_search(q: str, limit: int = 8):
             "reviews": row.get("reviews"),
             "delivery": row.get("delivery"),
             "direct_retailer": bool(direct_url),
+            # lets the app ask for this product's size and colour after the user selects it
+            "page_token": row.get("immersive_product_page_token"),
         })
         if len(products) >= limit:
             break
@@ -183,6 +188,56 @@ def product_search(q: str, limit: int = 8):
         "provider": "SerpAPI Google Shopping",
         "products": products,
     }
+
+
+_detail_cache: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()  # page_token hash -> (time, details)
+DETAIL_TTL = 24 * 3600
+DETAIL_CACHE_MAX = 300
+
+
+def _fetch_image(url: str) -> bytes | None:
+    """Download one product thumbnail (https only, small) so we can read its main colour."""
+    if not url.startswith("https://"):
+        return None
+    try:
+        with urlopen(Request(url, headers={"User-Agent": "RoomFit/1.0"}), timeout=8) as resp:
+            data = resp.read(2 * 1024 * 1024 + 1)
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return None
+    return data if len(data) <= 2 * 1024 * 1024 else None
+
+
+@api.get("/products/detail")
+def product_detail(token: str):
+    """Size and main colour of ONE product the user selected (one extra SerpAPI search, cached for a day)."""
+    token = token.strip()
+    if len(token) < 20 or len(token) > 4000:
+        raise HTTPException(400, "Product token is missing or invalid.")
+    key = hashlib.sha1(token.encode()).hexdigest()
+    hit = _detail_cache.get(key)
+    if hit and time.time() - hit[0] < DETAIL_TTL:
+        _detail_cache.move_to_end(key)
+        return {**hit[1], "cached": True}
+
+    api_key = os.environ.get("SERPAPI_KEY")
+    if not api_key:
+        raise HTTPException(503, "Real shopping search is not configured. Add SERPAPI_KEY to floorplan3d-service/.env and restart the server.")
+    params = urlencode({"engine": "google_immersive_product", "page_token": token, "api_key": api_key})
+    try:
+        with urlopen(Request(f"https://serpapi.com/search.json?{params}", headers={"User-Agent": "RoomFit/1.0"}), timeout=25) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        raise HTTPException(502, f"Shopping provider returned HTTP {e.code}.")
+    except (URLError, TimeoutError, json.JSONDecodeError):
+        raise HTTPException(502, "Could not reach the shopping provider.")
+    if payload.get("error"):
+        raise HTTPException(502, str(payload["error"]))
+
+    details = build_details(payload, _fetch_image)
+    _detail_cache[key] = (time.time(), details)
+    while len(_detail_cache) > DETAIL_CACHE_MAX:
+        _detail_cache.popitem(last=False)
+    return {**details, "cached": False}
 
 
 @app.get("/")
