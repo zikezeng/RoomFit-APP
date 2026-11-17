@@ -6,7 +6,7 @@ import { generateLayouts, trySwap } from "@/src/lib/solver";
 import { Apartment, CategoryId, HomeType, Layout, MoodId, Need, PlacedItem, Product, RealProductSelection, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
 import { storage } from "@/src/utils/storage";
 
-export type RoomConfig = Pick<PlanState, "needsKind" | "needs" | "customItems" | "budget" | "allocations">;
+export type RoomConfig = Pick<PlanState, "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "categoryBudgets">;
 
 export interface PlanState {
   selectedRoomIds: string[];
@@ -22,8 +22,10 @@ export interface PlanState {
   styles: StyleId[];
   moods: MoodId[];
   inspirations: string[];
-  budget: number;
+  budget: number; // current room cap for solver
+  apartmentBudget: number; // shared spending limit across selected rooms
   allocations: Partial<Record<CategoryId, number>>;
+  categoryBudgets: Partial<Record<CategoryId, number>>;
   layouts: Layout[] | null;
   seed: number;
   selectedLayoutId: string | null;
@@ -32,12 +34,12 @@ export interface PlanState {
   realSelections: Record<string, RealProductSelection>;
 }
 
-export type RoomProgress = Pick<PlanState, "roomKind" | "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "layouts" | "seed" | "selectedLayoutId" | "plan" | "realSelections">;
+export type RoomProgress = Pick<PlanState, "roomKind" | "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "categoryBudgets" | "layouts" | "seed" | "selectedLayoutId" | "plan" | "realSelections">;
 export const roomRank = (kind: RoomKind) => kind === "living" ? 0 : kind === "bedroom" ? 1 : FURNISHABLE.includes(kind) ? 2 : 3;
 export function saveRoom(s: PlanState): PlanState {
   if (!s.selectedRoomId) return s;
-  const { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan, realSelections } = s;
-  return { ...s, roomProgress: { ...s.roomProgress, [s.selectedRoomId]: { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan, realSelections } } };
+  const { roomKind, needsKind, needs, customItems, budget, allocations, categoryBudgets, layouts, seed, selectedLayoutId, plan, realSelections } = s;
+  return { ...s, roomProgress: { ...s.roomProgress, [s.selectedRoomId]: { roomKind, needsKind, needs, customItems, budget, allocations, categoryBudgets, layouts, seed, selectedLayoutId, plan, realSelections } } };
 }
 export function activateRoom(state: PlanState, id: string): PlanState {
   const s = saveRoom(state);
@@ -47,7 +49,7 @@ export function activateRoom(state: PlanState, id: string): PlanState {
   const defaults = initialState();
   return saveRoom({ ...s, ...(saved?.roomKind === room.kind ? saved : {
     roomKind: room.kind, needsKind: room.kind, needs: defaultNeeds(room.kind, s.apartment.homeType),
-    customItems: [], budget: defaults.budget, allocations: defaults.allocations,
+    customItems: [], budget: defaults.budget, allocations: defaults.allocations, categoryBudgets: {},
     layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {},
   }), selectedRoomId: id });
 }
@@ -116,6 +118,8 @@ export const initialState = (): PlanState => ({
   moods: [],
   inspirations: [],
   budget: 2500,
+  apartmentBudget: 2500,
+  categoryBudgets: {},
   allocations: Object.fromEntries(CATEGORIES.map((c) => [c.id, c.defaultPct])),
   layouts: null,
   seed: 0,
@@ -135,23 +139,65 @@ export const demoState = (): PlanState => {
 };
 
 // Existing budget and product-detail components read the current room through these helpers.
-export const configOf = (s: RoomConfig): RoomConfig => ({ needsKind: s.needsKind, needs: s.needs, customItems: s.customItems, budget: s.budget, allocations: s.allocations });
+export const configOf = (s: RoomConfig): RoomConfig => ({ needsKind: s.needsKind, needs: s.needs, customItems: s.customItems, budget: s.budget, allocations: s.allocations, categoryBudgets: s.categoryBudgets ?? {} });
 export const configsOf = (s: PlanState): Record<string, RoomConfig> => ({ ...s.roomProgress, ...(s.selectedRoomId ? { [s.selectedRoomId]: configOf(s) } : {}) });
-export const totalBudget = (s: PlanState) => s.budget;
+export const totalBudget = (s: PlanState) => s.apartmentBudget;
 export const itemCount = (c: RoomConfig) => c.customItems.length + Object.values(c.needs).reduce((sum, n) => sum + (n?.qty ?? 0), 0);
+
+/** Split the apartment-wide spending cap across selected rooms.
+ * User-selected furniture targets remain independent dollar amounts.
+ */
+export function rebalanceRoomBudgets(s: PlanState): PlanState {
+  const ids = s.selectedRoomIds;
+  if (!ids.length) return { ...s, budget: s.apartmentBudget };
+  const existing = configsOf(s);
+  const weights = ids.map(id => {
+    const cfg = existing[id];
+    const targets = Object.values(cfg?.categoryBudgets ?? {}).reduce((a, v) => a + Math.max(0, v ?? 0), 0);
+    const custom = cfg?.customItems.reduce((a, x) => a + x.price, 0) ?? 0;
+    return Math.max(1, targets ? targets + custom : cfg?.budget ?? s.budget);
+  });
+  const total = weights.reduce((a,b) => a+b,0);
+  let used = 0;
+  const progress = { ...s.roomProgress };
+  ids.forEach((id,index) => {
+    const room = s.apartment.rooms.find(r => r.id === id);
+    const cfg = existing[id] ?? {
+      needsKind: room?.kind ?? null, needs: defaultNeeds(room?.kind ?? "living", s.apartment.homeType),
+      customItems: [], budget: s.budget, allocations: s.allocations, categoryBudgets: {},
+    };
+    const cap = index === ids.length-1 ? s.apartmentBudget - used : Math.round(s.apartmentBudget*weights[index]/total);
+    used += cap;
+    progress[id] = {
+      roomKind: room?.kind ?? null, ...(progress[id] ?? {}), ...cfg, categoryBudgets: cfg.categoryBudgets ?? {},
+      budget: cap, layouts: null, selectedLayoutId: null, plan: null,
+    };
+  });
+  const active = s.selectedRoomId ? progress[s.selectedRoomId] : null;
+  return { ...s, roomProgress: progress, budget: active?.budget ?? s.budget,
+    layouts: null, selectedLayoutId: null, plan: null };
+}
+
 
 /** Preserve sessions saved by either the single-room or simultaneous-room version. */
 export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<string, RoomConfig> }): PlanState {
   const s = { ...initialState(), ...saved, roomProgress: { ...saved.roomProgress } };
   s.realSelections = saved.realSelections ?? {};
   for (const [id, progress] of Object.entries(s.roomProgress)) {
-    s.roomProgress[id] = { ...progress, realSelections: progress.realSelections ?? {} };
+    s.roomProgress[id] = { ...progress, categoryBudgets: progress.categoryBudgets ?? {}, realSelections: progress.realSelections ?? {} };
   }
   s.selectedRoomIds = (saved.selectedRoomIds ?? (saved.selectedRoomId ? [saved.selectedRoomId] : []))
     .filter(id => s.apartment.rooms.some(r => r.id === id && FURNISHABLE.includes(r.kind)))
     .sort((a, b) => roomRank(s.apartment.rooms.find(r => r.id === a)!.kind) - roomRank(s.apartment.rooms.find(r => r.id === b)!.kind));
+  if (saved.apartmentBudget == null) {
+    const cfgs = configsOf(s);
+    s.apartmentBudget = s.selectedRoomIds.length
+      ? s.selectedRoomIds.reduce((sum, id) => sum + (cfgs[id]?.budget ?? 2500), 0)
+      : s.budget;
+  }
+  s.categoryBudgets = s.categoryBudgets ?? {};
   for (const [id, config] of Object.entries(saved.roomConfigs ?? {})) {
-    if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {} };
+    if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, categoryBudgets: config.categoryBudgets ?? {}, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {} };
   }
   if (saved.plan?.some(item => item.roomId)) {
     for (const id of s.selectedRoomIds) {
@@ -187,6 +233,7 @@ interface Ctx {
   ready: boolean;
   geom: RoomGeom | null;
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
+  setApartmentBudget: (amount: number) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
   selectRoom: (id: string) => void;
   startRooms: () => void;
@@ -246,7 +293,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const update = useCallback((patch: Partial<PlanState>, invalidate: Invalidate = "none") => {
     setState((s) => {
-      const n = { ...s, ...patch };
+      let n = { ...s, ...patch };
+      if ("apartmentBudget" in patch || "categoryBudgets" in patch) n = rebalanceRoomBudgets(n);
       if (invalidate !== "none") {
         n.layouts = null;
         n.selectedLayoutId = null;
@@ -257,6 +305,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       }
       return n;
     });
+  }, [setState]);
+
+  const setApartmentBudget = useCallback((amount: number) => {
+    setState(s => rebalanceRoomBudgets({ ...s, apartmentBudget: amount, realSelections: {} }));
   }, [setState]);
 
   /** Any change to the apartment geometry invalidates layouts and the furnished plan. */
@@ -271,7 +323,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [setState]);
 
   const selectRoom = useCallback((id: string) => setState(s => toggleRoom(s, id)), [setState]);
-  const startRooms = useCallback(() => setState(s => s.selectedRoomIds.length ? activateRoom(s, s.selectedRoomIds[0]) : s), [setState]);
+  const startRooms = useCallback(() => setState(s => s.selectedRoomIds.length ? activateRoom(rebalanceRoomBudgets(s), s.selectedRoomIds[0]) : s), [setState]);
   const previousRoom = useCallback(() => setState(s => advanceRoom(s, -1)), [setState]);
   const nextRoom = useCallback(() => setState(s => advanceRoom(s, 1)), [setState]);
 
@@ -279,7 +331,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const s = stateRef.current;
     const g = geomRef.current;
     if (!g) return;
-    const layouts = generateLayouts({ geom: g, needs: s.needs, customItems: s.customItems, prefs: { styles: s.styles, moods: s.moods }, budget: s.budget, allocations: s.allocations, seed });
+    const layouts = generateLayouts({ geom: g, needs: s.needs, customItems: s.customItems, prefs: { styles: s.styles, moods: s.moods }, budget: s.budget, allocations: s.allocations, categoryBudgets: s.categoryBudgets ?? {}, seed });
     setState((p) => ({ ...p, layouts, seed, selectedLayoutId: null }));
   }, [setState]);
 
@@ -322,8 +374,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const loadDemo = useCallback(() => setState(demoState()), [setState]);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
-    [state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartmentBudget, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
+    [state, ready, geom, update, setApartmentBudget, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

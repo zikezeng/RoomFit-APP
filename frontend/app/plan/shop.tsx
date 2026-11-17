@@ -7,7 +7,6 @@ import { Pressable, Text, View } from "react-native";
 import { BudgetBar } from "@/src/components/BudgetBar";
 import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { ProductSheet } from "@/src/components/ProductSheet";
-import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
@@ -16,6 +15,16 @@ import { fitCheck, sizeText } from "@/src/lib/product-fit";
 import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
+
+const FURNITURE_EMOJI: Record<string, string> = {
+  sofa: "🛋️", coffee_table: "☕", tv_stand: "📺", armchair: "🪑",
+  floor_lamp: "💡", dining_table: "🍽️", dining_chair: "🪑",
+  shoe_cabinet: "👟", cabinet: "🗄️", bed_frame: "🛏️", mattress: "🛏️",
+  nightstand: "🗄️", wardrobe: "👕", desk: "💻", study_chair: "🪑",
+  dresser: "🗄️", side_table: "☕", bookshelf: "📚", rug: "🧶",
+  console_table: "🗄️", ottoman: "🛋️", bench: "🪑",
+  floor_mirror: "🪞", planter: "🪴", custom: "📦",
+};
 
 export default function ShopStep() {
   const router = useRouter();
@@ -110,7 +119,7 @@ export default function ShopStep() {
             if (!selected && !isCustom) {
               return (
                 <Pressable key={it.uid} onPress={() => setUid(it.uid)} testID={`shop-item-${it.uid}`} style={({ pressed }) => [s.item, s.itemEmpty, pressed && { opacity: 0.8 }]}>
-                  <ProductSwatch category={p.category} style={p.styles[0]} size={52} />
+                  <View style={s.emojiBox}><Text style={s.emoji}>{FURNITURE_EMOJI[p.category] ?? "📦"}</Text></View>
                   <View style={{ flex: 1, gap: 2 }}>
                     <Text style={s.name}>{label}</Text>
                     <Text style={s.caption}>Not chosen yet · space in layout {space}</Text>
@@ -129,7 +138,7 @@ export default function ShopStep() {
                 {selected?.image ? (
                   <Image source={{ uri: selected.image }} style={s.realThumb} contentFit="cover" transition={120} />
                 ) : (
-                  <ProductSwatch category={p.category} style={p.styles[0]} size={52} />
+                  <View style={s.emojiBox}><Text style={s.emoji}>{FURNITURE_EMOJI[p.category] ?? "📦"}</Text></View>
                 )}
                 <View style={{ flex: 1, gap: 2 }}>
                   {selected ? <Text style={s.slot}>{label}</Text> : null}
@@ -180,6 +189,8 @@ const useStyles = makeStyles((c) => ({
   slot: { fontFamily: fonts.text, fontSize: 11, color: c.muted, textTransform: "uppercase", letterSpacing: 0.8 },
   status: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginTop: spacing.sm },
   caption: { flex: 1, fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },
+  emojiBox: { width: 52, height: 52, alignItems: "center", justifyContent: "center", borderRadius: radius.md, backgroundColor: c.brandTertiary },
+  emoji: { fontSize: 29 },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, backgroundColor: c.surfaceSecondary, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border },
   itemSelected: { borderColor: c.success, borderWidth: 2 },
   realThumb: { width: 52, height: 52, borderRadius: radius.md, backgroundColor: c.surfaceTertiary },

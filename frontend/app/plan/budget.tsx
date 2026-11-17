@@ -1,252 +1,311 @@
 import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Text, TextInput, View } from "react-native";
 
 import { Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORIES } from "@/src/lib/catalog";
 import { typicalCost } from "@/src/lib/ranking";
 import { perUnitAllocation } from "@/src/lib/solver";
-import { usePlan } from "@/src/state/plan-store";
+import { configsOf, defaultNeeds, usePlan } from "@/src/state/plan-store";
+import { CategoryId } from "@/src/lib/types";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-const MIN = 300;
-const MAX = 15000;
-const CHANGE_AMOUNT = 50;
+const MIN_TOTAL = 300;
+const MAX_TOTAL = 150000;
+const WARNING_THRESHOLD = 0.9;
+const digits = (text: string) => text.replace(/[^0-9]/g, "");
+type Category = (typeof CATEGORIES)[number];
+
+interface CategoryRowProps {
+  category: Category;
+  quantity: number;
+  amount: number;
+  typical: number;
+  limit: number;
+  onCommit: (amount: number) => void;
+}
+
+function CategoryRow({ category, quantity, amount, typical, limit, onCommit }: CategoryRowProps) {
+  const s = useStyles();
+  const { colors } = useTheme();
+  const [draft, setDraft] = useState(String(Math.round(amount)));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(String(Math.round(amount)));
+  }, [editing, amount]);
+  const commit = () => {
+    setEditing(false);
+    const n = Number(draft || "0");
+    const value = Number.isFinite(n) ? Math.max(0, Math.min(MAX_TOTAL, Math.round(n))) : 0;
+    setDraft(String(value));
+    onCommit(value);
+  };
+  const sliderMax = Math.max(100, limit, amount);
+  return (
+    <Card style={s.categoryCard} testID={`alloc-row-${category.id}`}>
+      <View style={s.between}>
+        <Text style={s.name}>{quantity}× {category.label}</Text>
+        <View style={s.categoryInputRow}>
+          <Text style={s.currency}>$</Text>
+          <TextInput
+            testID={`alloc-input-${category.id}`}
+            accessibilityLabel={`${category.label} target in dollars`}
+            style={s.categoryInput}
+            keyboardType="number-pad"
+            selectTextOnFocus
+            value={draft}
+            onFocus={() => setEditing(true)}
+            onChangeText={t => setDraft(digits(t))}
+            onBlur={commit}
+            onSubmitEditing={commit}
+          />
+        </View>
+      </View>
+      <View style={s.between}>
+        <Text style={s.k}>Typical cost for {quantity}</Text>
+        <Text style={s.k}>{money(typical)}</Text>
+      </View>
+      <Slider
+        testID={`alloc-slider-${category.id}`}
+        minimumValue={0}
+        maximumValue={sliderMax}
+        step={25}
+        value={Math.min(amount, sliderMax)}
+        onSlidingComplete={v => { setEditing(false); onCommit(Math.round(v)); }}
+        minimumTrackTintColor={colors.brandPrimary}
+        maximumTrackTintColor={colors.surfaceTertiary}
+        thumbTintColor={colors.brandPrimary}
+      />
+      <Text style={s.k}>Drag to adjust or type an amount above.</Text>
+    </Card>
+  );
+}
 
 export default function BudgetStep() {
   const { state } = usePlan();
-  return <RoomBudget key={state.selectedRoomId} />;
+  return <ApartmentBudget key={state.selectedRoomId ?? "none"} />;
 }
 
-function RoomBudget() {
+function ApartmentBudget() {
   const router = useRouter();
-  const { state, update } = usePlan();
+  const { state, update, setApartmentBudget } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
-  const [text, setText] = useState(String(state.budget));
-  const [err, setErr] = useState<string | null>(null);
+  const [draft, setDraft] = useState(String(state.apartmentBudget));
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editing) setDraft(String(state.apartmentBudget));
+  }, [state.apartmentBudget, editing]);
 
-  const setBudget = (v: number) => {
-    setText(String(Math.round(v)));
-    setErr(null);
-    update({ budget: Math.round(v) }, "layouts");
+  const onBudgetText = (text: string) => {
+    const clean = digits(text);
+    setDraft(clean);
+    const number = Number(clean);
+    if (!clean) setError("Enter a total apartment budget.");
+    else if (!Number.isFinite(number) || number < MIN_TOTAL || number > MAX_TOTAL)
+      setError(`Enter a budget between ${money(MIN_TOTAL)} and ${money(MAX_TOTAL)}.`);
+    else setError(null);
   };
-  const onText = (t: string) => {
-    const clean = t.replace(/[^0-9]/g, "");
-    setText(clean);
-    const v = parseInt(clean, 10);
-    if (!clean || isNaN(v)) return setErr("Enter a budget amount.");
-    if (v < MIN) return setErr(`Budget must be at least ${money(MIN)}.`);
-    if (v > MAX) return setErr(`Budget can be at most ${money(MAX)}.`);
-    setErr(null);
-    setBudget(v);
+  const commitBudget = () => {
+    setEditing(false);
+    const n = Number(draft);
+    if (!draft || !Number.isFinite(n) || n < MIN_TOTAL || n > MAX_TOTAL) return;
+    setApartmentBudget(Math.round(n));
   };
 
   const prefs = { styles: state.styles, moods: state.moods };
-  const selected = CATEGORIES.filter((c) => (state.needs[c.id]?.qty ?? 0) > 0);
-  const customTotal = state.customItems.reduce((sum, p) => sum + p.price, 0);
-  const pool = Math.max(0, state.budget - customTotal);
-  const allocations = perUnitAllocation(state.needs, state.allocations, pool);
-  const estimate = customTotal + selected.reduce(
-    (sum, c) => sum + typicalCost(c.id, prefs) * state.needs[c.id]!.qty,
-    0,
-  );
-  const remaining = state.budget - estimate;
-
-  // Amounts are the user-facing representation of the existing allocation weights.
-  // The solver continues receiving the same `state.allocations` data structure.
-  const getCategoryTotal = (id: (typeof CATEGORIES)[number]["id"]) =>
-    (allocations[id] ?? 0) * (state.needs[id]?.qty ?? 0);
-
-  const changeCategoryBudget = (id: (typeof CATEGORIES)[number]["id"], delta: number) => {
-    if (selected.length < 2 || pool <= 0) return;
-    const category = selected.find((c) => c.id === id);
-    if (!category) return;
-
-    const quantity = state.needs[id]?.qty ?? 0;
-    if (quantity <= 0) return;
-
-    const oldTotal = getCategoryTotal(id);
-    const nextTotal = Math.max(1, Math.min(pool - 1, oldTotal + delta));
-    if (Math.abs(nextTotal - oldTotal) < 0.01) return;
-
-    // Preserve every other category's weight. Solve for this category's new
-    // weight so its total dollar share moves to the selected target.
-    const othersWeighted = selected.reduce((sum, c) => {
-      if (c.id === id) return sum;
-      return sum + (state.allocations[c.id] ?? c.defaultPct) * state.needs[c.id]!.qty;
+  const configs = configsOf(state);
+  const roomIds = state.selectedRoomIds.length
+    ? state.selectedRoomIds : state.selectedRoomId ? [state.selectedRoomId] : [];
+  const summary = roomIds.map(id => {
+    const room = state.apartment.rooms.find(r => r.id === id);
+    const config = configs[id];
+    const needs = config?.needs ?? defaultNeeds(room?.kind ?? "living", state.apartment.homeType);
+    const custom = config?.customItems ?? [];
+    const items = CATEGORIES.filter(cat => (needs[cat.id]?.qty ?? 0) > 0);
+    const customCost = custom.reduce((sum, item) => sum + item.price, 0);
+    const estimate = customCost + items.reduce((sum, cat) =>
+      sum + (needs[cat.id]?.qty ?? 0) * typicalCost(cat.id, prefs), 0);
+    const targets = config?.categoryBudgets ?? {};
+    const defaultSplit = perUnitAllocation(needs, config?.allocations ?? state.allocations,
+      Math.max(0, (config?.budget ?? state.budget) - customCost));
+    const planned = customCost + items.reduce((sum, cat) => {
+      const qty = needs[cat.id]!.qty;
+      const existing = targets[cat.id];
+      const fallback = Object.keys(targets).length
+        ? typicalCost(cat.id, prefs) * qty
+        : (defaultSplit[cat.id] ?? 0) * qty;
+      return sum + (existing ?? fallback);
     }, 0);
-    if (othersWeighted <= 0) return;
+    return { id, name: room?.label ?? "Room", items, needs, targets, defaultSplit, customCost, estimate, planned };
+  });
+  const active = summary.find(row => row.id === state.selectedRoomId);
+  const roomName = active?.name ?? "Selected room";
+  const estimated = summary.reduce((sum, row) => sum + row.estimate, 0);
+  const planned = summary.reduce((sum, row) => sum + row.planned, 0);
+  const comparison = Math.max(estimated, planned);
+  const usage = state.apartmentBudget > 0 ? comparison / state.apartmentBudget : 0;
+  const over = usage > 1;
+  const near = !over && usage >= WARNING_THRESHOLD;
+  const accent = over ? colors.error : near ? colors.warning : colors.success;
+  const remaining = state.apartmentBudget - comparison;
 
-    const nextWeight = (nextTotal * othersWeighted) / (quantity * (pool - nextTotal));
-    if (!Number.isFinite(nextWeight) || nextWeight <= 0) return;
-
-    update({ allocations: { ...state.allocations, [id]: nextWeight } }, "layouts");
+  const saveCategory = (id: CategoryId, dollars: number) => {
+    if (!active) return;
+    const next = { ...active.targets };
+    // Initialize every selected category's explicit value before changing one.
+    for (const cat of active.items) {
+      if (next[cat.id] == null)
+        next[cat.id] = Math.round((active.defaultSplit[cat.id] ?? 0) * active.needs[cat.id]!.qty);
+    }
+    next[id] = dollars;
+    update({ categoryBudgets: next }, "layouts");
   };
-
-  const missingBudget = state.customItems.length + selected.reduce((sum, c) => sum + state.needs[c.id]!.qty, 0) === 0 || state.budget <= customTotal;
 
   return (
     <WizardScaffold
       step={6}
       title="Let's Plan Your Budget"
-      subtitle="Set the budget for this room, then decide how much to spend on each furniture category."
+      subtitle="Set one budget for all rooms, then adjust furniture spending targets."
+      keyboardAware
       cta={{
         label: "Generate layouts",
         icon: "grid",
-        disabled: !!err || !state.selectedRoomIds.length || missingBudget,
-        onPress: () => router.push("/plan/layouts"),
+        disabled: !!error || !roomIds.length || !active?.items.length || active.planned <= 0,
+        onPress: () => { commitBudget(); router.push("/plan/layouts"); },
         testID: "budget-continue-button",
       }}
     >
-
       <Card style={{ gap: spacing.md }}>
-        <Text style={s.k}>{state.apartment.rooms.find((r) => r.id === state.selectedRoomId)?.label} budget</Text>
-        <View style={s.amountRow}>
+        <Text style={s.h}>Total apartment budget</Text>
+        <Text style={s.k}>Shared across all {roomIds.length || 1} selected rooms.</Text>
+        <View style={s.totalInputRow}>
           <Text style={s.dollar}>$</Text>
           <TextInput
             testID="budget-input"
-            accessibilityLabel="Total furniture budget in dollars"
-            value={text}
-            onChangeText={onText}
+            accessibilityLabel="Total budget for all rooms in dollars"
+            value={draft}
             keyboardType="number-pad"
-            style={s.amount}
+            onFocus={() => setEditing(true)}
+            onChangeText={onBudgetText}
+            onBlur={commitBudget}
+            onSubmitEditing={commitBudget}
+            style={s.totalInput}
+            placeholder="e.g. 5000"
           />
         </View>
-        <Slider
-          testID="budget-slider"
-          minimumValue={MIN}
-          maximumValue={MAX}
-          step={50}
-          value={state.budget}
-          onSlidingComplete={setBudget}
-          minimumTrackTintColor={colors.brandPrimary}
-          maximumTrackTintColor={colors.surfaceTertiary}
-          thumbTintColor={colors.brandPrimary}
-        />
-        <View style={s.between}>
-          <Text style={s.k}>{money(MIN)}</Text>
-          <Text style={s.k}>{money(MAX)}</Text>
-        </View>
-        {err ? <Notice tone="error" text={err} testID="budget-error" /> : null}
+        {error ? <Notice tone="error" text={error} testID="budget-error" /> : null}
       </Card>
-
-      <Card style={{ gap: spacing.sm }}>
+      <Text style={s.h}>Furniture budget breakdown</Text>
+      <Text style={s.description}>
+        {roomName}: type a target for each category, or drag the slider. Targets are independent.
+      </Text>
+      {active && active.customCost > 0 ? (
+        <View style={s.summaryRow}>
+          <Text style={s.k}>Custom items in {roomName}</Text>
+          <Text style={s.summaryValue}>{money(active.customCost)}</Text>
+        </View>
+      ) : null}
+      {active?.items.map(cat => {
+        const qty = active.needs[cat.id]!.qty;
+        const typical = typicalCost(cat.id, prefs) * qty;
+        const amount = active.targets[cat.id] ??
+          (Object.keys(active.targets).length ? typical : (active.defaultSplit[cat.id] ?? 0) * qty);
+        return <CategoryRow
+          key={cat.id}
+          category={cat}
+          quantity={qty}
+          typical={typical}
+          amount={amount}
+          limit={state.apartmentBudget}
+          onCommit={value => saveCategory(cat.id, value)}
+        />;
+      })}
+      <View style={s.summaryRow}>
+        <Text style={s.summaryLabel}>Planned for {roomName}</Text>
+        <Text style={s.summaryValue}>{money(active?.planned ?? 0)}</Text>
+      </View>
+      {summary.length > 1 ? (
+        <Card style={{ gap: spacing.sm }}>
+          <Text style={s.name}>All selected rooms</Text>
+          {summary.map(row => (
+            <View key={row.id} style={s.between}>
+              <Text style={s.k}>{row.name}</Text>
+              <Text style={s.summaryValue}>{money(row.planned)}</Text>
+            </View>
+          ))}
+        </Card>
+      ) : null}
+      <Card style={[s.estimateCard, near && s.warnCard, over && s.overCard]} testID="budget-estimate-card">
+        <Text style={s.h}>Estimated furniture cost</Text>
+        <Text style={s.k}>All selected rooms · typical catalog prices</Text>
         <View style={s.between}>
-          <Text style={s.k}>Estimated furniture cost</Text>
-          <Text style={s.v} testID="budget-estimate">{money(estimate)}</Text>
+          <Text style={s.k}>Estimated cost</Text>
+          <Text style={s.bigValue} testID="budget-estimate">{money(estimated)}</Text>
         </View>
         <View style={s.between}>
-          <Text style={s.k}>Remaining after estimated purchases</Text>
-          <Text style={[s.v, { color: remaining >= 0 ? colors.success : colors.error }]} testID="budget-remaining">
-            {money(remaining)}
-          </Text>
+          <Text style={s.k}>Furniture spending targets</Text>
+          <Text style={s.summaryValue} testID="budget-planned">{money(planned)}</Text>
+        </View>
+        <View style={s.between}>
+          <Text style={s.k}>Remaining budget</Text>
+          <Text style={[s.bigValue, { color: accent }]} testID="budget-remaining">{money(remaining)}</Text>
         </View>
         <View style={s.bar}>
           <View style={[s.fill, {
-            width: `${state.budget > 0 ? Math.max(0, Math.min(100, (estimate / state.budget) * 100)) : 0}%`,
-            backgroundColor: remaining >= 0 ? colors.brandPrimary : colors.error,
+            width: `${Math.min(100, usage * 100)}%`,
+            backgroundColor: accent,
           }]} />
         </View>
-        <Text style={s.k}>Estimated cost uses typical catalog prices, not your allocated spending limits.</Text>
+        {over ? (
+          <Text style={[s.status, { color: colors.error }]}>
+            Over budget. Reduce furniture targets or increase the total budget.
+          </Text>
+        ) : near ? (
+          <Text style={[s.status, { color: colors.warning }]}>
+            Close to the budget limit (90% or more). Consider leaving a buffer.
+          </Text>
+        ) : (
+          <Text style={[s.status, { color: colors.success }]}>
+            Within budget. Allow for unexpected costs.
+          </Text>
+        )}
+        <Text style={s.k}>
+          The warning uses the higher of catalog estimates and spending targets.
+          Actual purchases may differ.
+        </Text>
       </Card>
-
-      <Text style={s.h}>Furniture budget breakdown</Text>
-      <Text style={s.description}>
-        Choose how to split your budget. Use + or − to move about $50 between furniture categories.
-      </Text>
-
-      {customTotal > 0 ? (
-        <View style={s.summaryRow}>
-          <Text style={s.k}>Reserved for custom items</Text>
-          <Text style={s.summaryValue}>{money(customTotal)}</Text>
-        </View>
-      ) : null}
-
-      {selected.map((c) => {
-        const quantity = state.needs[c.id]!.qty;
-        const categoryTotal = getCategoryTotal(c.id);
-        const typicalTotal = typicalCost(c.id, prefs) * quantity;
-        const editable = selected.length > 1 && pool > 2;
-        return (
-          <Card key={c.id} style={s.categoryCard} testID={`alloc-row-${c.id}`}>
-            <View style={s.between}>
-              <Text style={s.name}>{quantity}× {c.label}</Text>
-              <Text style={s.categoryAmount} testID={`alloc-amount-${c.id}`}>
-                {money(Math.round(categoryTotal))}
-              </Text>
-            </View>
-            <View style={s.between}>
-              <Text style={s.k}>Typical price for {quantity}</Text>
-              <Text style={s.k}>{money(typicalTotal)}</Text>
-            </View>
-            <View style={s.controlRow}>
-              <Text style={s.adjustLabel}>Adjust allocation</Text>
-              <View style={s.actions}>
-                <Pressable
-                  testID={`alloc-decrease-${c.id}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Decrease ${c.label} budget by $50`}
-                  disabled={!editable || categoryTotal <= 1.01}
-                  onPress={() => changeCategoryBudget(c.id, -CHANGE_AMOUNT)}
-                  style={[s.adjustButton, (!editable || categoryTotal <= 1.01) && s.disabled]}
-                >
-                  <Text style={s.adjustText}>−</Text>
-                </Pressable>
-                <Text style={s.stepLabel}>$50</Text>
-                <Pressable
-                  testID={`alloc-increase-${c.id}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Increase ${c.label} budget by $50`}
-                  disabled={!editable || categoryTotal >= pool - 1.01}
-                  onPress={() => changeCategoryBudget(c.id, CHANGE_AMOUNT)}
-                  style={[s.adjustButton, (!editable || categoryTotal >= pool - 1.01) && s.disabled]}
-                >
-                  <Text style={s.adjustText}>+</Text>
-                </Pressable>
-              </View>
-            </View>
-          </Card>
-        );
-      })}
-
-      <View style={s.summaryRow}>
-        <Text style={s.summaryLabel}>Total allocated</Text>
-        <Text style={s.summaryValue}>{money(state.budget)}</Text>
-      </View>
-      <Text style={s.k}>
-        Your total budget stays the same. Increasing one category reduces the amounts available to others.
-        Actual products may cost less or more than these targets.
-      </Text>
-      {pool <= 0 ? <Notice tone="error" text="Your custom items use the full budget. Increase your budget to allocate money to furniture." /> : null}
     </WizardScaffold>
   );
 }
 
-const useStyles = makeStyles((c) => ({
-  k: { fontFamily: fonts.text, fontSize: 12, color: c.muted, flexShrink: 1 },
-  v: { fontFamily: fonts.text, fontSize: 18, fontWeight: "700", color: c.onSurface },
+const useStyles = makeStyles(c => ({
   h: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
-  description: { fontFamily: fonts.text, fontSize: 13, lineHeight: 19, color: c.muted },
+  k: { fontFamily: fonts.text, fontSize: 12, color: c.muted, flexShrink: 1 },
   name: { fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface, flexShrink: 1 },
-  categoryAmount: { fontFamily: fonts.text, fontSize: 21, fontWeight: "700", color: c.onSurface },
-  amountRow: { flexDirection: "row", alignItems: "center" },
-  dollar: { fontFamily: fonts.display, fontSize: 40, color: c.muted },
-  amount: { flex: 1, fontFamily: fonts.display, fontSize: 44, color: c.onSurface, paddingVertical: 0 },
+  description: { fontFamily: fonts.text, fontSize: 13, lineHeight: 20, color: c.muted },
   between: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md },
-  bar: { height: 10, borderRadius: radius.pill, backgroundColor: c.surfaceTertiary, overflow: "hidden" },
-  fill: { height: "100%", borderRadius: radius.pill },
+  totalInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: c.border,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: c.surfaceSecondary },
+  dollar: { fontFamily: fonts.display, fontSize: 34, color: c.muted },
+  totalInput: { flex: 1, fontFamily: fonts.display, fontSize: 34, color: c.onSurface, paddingVertical: spacing.md },
   categoryCard: { gap: spacing.sm, padding: spacing.md },
-  controlRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, marginTop: spacing.sm },
-  adjustLabel: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
-  actions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  adjustButton: { borderWidth: 1, borderColor: c.surfaceTertiary, borderRadius: radius.pill, width: 38, height: 38, alignItems: "center", justifyContent: "center" },
-  adjustText: { fontFamily: fonts.text, fontSize: 22, color: c.onSurface },
-  stepLabel: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
-  disabled: { opacity: 0.3 },
+  categoryInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1,
+    borderColor: c.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, minWidth: 110 },
+  currency: { fontFamily: fonts.text, fontSize: 17, color: c.muted },
+  categoryInput: { width: 94, minHeight: 40, textAlign: "right", fontFamily: fonts.text,
+    fontSize: 19, color: c.onSurface, fontWeight: "700", paddingVertical: 4 },
   summaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.sm },
   summaryLabel: { fontFamily: fonts.text, fontSize: 14, fontWeight: "600", color: c.onSurface },
-  summaryValue: { fontFamily: fonts.text, fontSize: 17, fontWeight: "700", color: c.onSurface },
+  summaryValue: { fontFamily: fonts.text, fontSize: 16, fontWeight: "700", color: c.onSurface },
+  estimateCard: { gap: spacing.md, borderWidth: 2, borderColor: c.border },
+  warnCard: { borderColor: c.warning, backgroundColor: c.warning + "12" },
+  overCard: { borderColor: c.error, backgroundColor: c.error + "12" },
+  bigValue: { fontFamily: fonts.text, fontSize: 20, color: c.onSurface, fontWeight: "700" },
+  status: { fontFamily: fonts.text, fontSize: 13, fontWeight: "700", lineHeight: 20 },
+  bar: { height: 10, borderRadius: radius.pill, backgroundColor: c.surfaceTertiary, overflow: "hidden" },
+  fill: { height: "100%", borderRadius: radius.pill },
 }));

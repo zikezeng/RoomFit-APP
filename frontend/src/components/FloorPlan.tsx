@@ -1,5 +1,5 @@
-import React from "react";
-import { Pressable, View } from "react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { PanResponder, Pressable, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Polygon, Rect, Text as SvgText } from "react-native-svg";
 
 import { RoomGeom } from "@/src/lib/apartment";
@@ -19,6 +19,69 @@ export const catFill = (c: ThemeColors, cat: CategoryId) => {
   return c.wood;
 };
 
+// Match the furniture icons used in Step 4 without changing that screen.
+const ICONS: Partial<Record<CategoryId, string>> = {
+  sofa: "🛋️", coffee_table: "☕", tv_stand: "📺", armchair: "🪑",
+  floor_lamp: "💡", dining_table: "🍽️", dining_chair: "🪑", shoe_cabinet: "👟",
+  cabinet: "🗄️", bed_frame: "🛏️", mattress: "🛏️", nightstand: "🗄️",
+  wardrobe: "👕", desk: "💻", study_chair: "🪑", dresser: "🗄️",
+  side_table: "☕", bookshelf: "📚", rug: "🧶", console_table: "🗄️",
+  ottoman: "🛋️", bench: "🪑", floor_mirror: "🪞", planter: "🪴",
+  custom: "📦",
+};
+
+function DragHandle({ rect, vw, vh, margin, pxWidth, onTap, onDrag, onDrop, onCancel, onDragStateChange, testID, label }: {
+  rect: { x: number; y: number; w: number; h: number };
+  vw: number; vh: number; margin: number; pxWidth: number;
+  onTap: () => void;
+  onDrag: (dx: number, dy: number) => void;
+  onDrop: (dx: number, dy: number) => void;
+  onCancel: () => void;
+  onDragStateChange?: (active: boolean) => void;
+  testID: string; label: string;
+}) {
+  // Keep responder identity stable while visual positions update on each gesture frame.
+  const handlers = useRef({ onTap, onDrag, onDrop, onCancel, onDragStateChange, pxWidth, vw });
+  handlers.current = { onTap, onDrag, onDrop, onCancel, onDragStateChange, pxWidth, vw };
+  const convert = (dx: number, dy: number) => {
+    const scale = handlers.current.pxWidth > 0 ? handlers.current.vw / handlers.current.pxWidth : 0;
+    return { x: dx * scale, y: dy * scale };
+  };
+  const convertRef = useRef(convert);
+  convertRef.current = convert;
+  const responder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => handlers.current.onDragStateChange?.(true),
+    onPanResponderMove: (_, gesture) => {
+      const d = convertRef.current(gesture.dx, gesture.dy);
+      handlers.current.onDrag(d.x, d.y);
+    },
+    onPanResponderRelease: (_, gesture) => {
+      handlers.current.onDragStateChange?.(false);
+      if (Math.abs(gesture.dx) + Math.abs(gesture.dy) < 6) handlers.current.onTap();
+      else {
+        const d = convertRef.current(gesture.dx, gesture.dy);
+        handlers.current.onDrop(d.x, d.y);
+      }
+    },
+    onPanResponderTerminate: () => {
+      handlers.current.onDragStateChange?.(false);
+      handlers.current.onCancel();
+    },
+  }), []);
+  return <View
+    {...responder.panHandlers}
+    testID={testID}
+    accessibilityLabel={`Drag ${label} to move it`}
+    style={{ position: "absolute", left: `${((rect.x + margin) / vw) * 100}%`,
+      top: `${((rect.y + margin) / vh) * 100}%`,
+      width: `${(Math.max(rect.w, 34) / vw) * 100}%`,
+      height: `${(Math.max(rect.h, 34) / vh) * 100}%` }}
+  />;
+}
+
 const SHORT: Partial<Record<CategoryId, string>> = {
   sofa: "Sofa", coffee_table: "Coffee tbl", tv_stand: "TV", armchair: "Chair", side_table: "Side", floor_lamp: "Lamp", bookshelf: "Shelf", desk: "Desk", rug: "Rug",
   dining_table: "Dining", dining_chair: "Ch", shoe_cabinet: "Shoes", cabinet: "Cabinet", study_chair: "Ch", bed_frame: "Bed", mattress: "", nightstand: "NS",
@@ -30,24 +93,31 @@ interface Props {
   items?: PlacedItem[];
   selectedUid?: string | null;
   onPressItem?: (uid: string) => void;
+  onMoveItem?: (uid: string, cx: number, cy: number) => void;
+  onDragStateChange?: (active: boolean) => void;
+  editable?: boolean;
   showDims?: boolean;
   testID?: string;
 }
 
 /** Scaled top-down plan of ONE room (real polygon geometry, cm). */
-export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, showDims = true, testID }: Props) {
+export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, onDragStateChange, editable = false, showDims = true, testID }: Props) {
   const { colors } = useTheme();
+  const [pixelWidth, setPixelWidth] = useState(0);
+  const [preview, setPreview] = useState<{ uid: string; cx: number; cy: number } | null>(null);
   const W = g.width;
   const L = g.length;
   const M = Math.max(W, L) * 0.1;
   const fs = Math.max(W, L) / 34;
   const wallW = Math.max(W, L) / 60;
-  const ordered = [...items].sort((a, b) => Number(["rug", "mattress"].includes(a.category) ? 0 : 1) - Number(["rug", "mattress"].includes(b.category) ? 0 : 1)).sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug"));
+  const rendered = preview ? items.map(it => it.uid === preview.uid ? { ...it, cx: preview.cx, cy: preview.cy, wall: null } : it) : items;
+  const ordered = [...rendered].sort((a, b) => Number(["rug", "mattress"].includes(a.category) ? 0 : 1) - Number(["rug", "mattress"].includes(b.category) ? 0 : 1)).sort((a, b) => Number(b.category === "rug") - Number(a.category === "rug"));
   const pts = g.poly.map((p) => `${p.x},${p.y}`).join(" ");
   const VW = W + 2 * M;
   const VH = L + 2 * M;
+  const originalByUid = new Map(items.map(it => [it.uid, it]));
   return (
-    <View testID={testID} style={{ width: "100%", aspectRatio: VW / VH }}>
+    <View testID={testID} onLayout={e => setPixelWidth(e.nativeEvent.layout.width)} style={{ width: "100%", aspectRatio: VW / VH }}>
       <Svg width="100%" height="100%" viewBox={`${-M} ${-M} ${VW} ${VH}`}>
         <Polygon points={pts} fill={colors.surfaceSecondary} stroke={colors.onSurface} strokeWidth={wallW} strokeLinejoin="miter" />
         {g.obstacles.map((o, i) => (
@@ -84,6 +154,7 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, showD
           const soft = it.category === "rug" || it.category === "mattress";
           const small = Math.min(r.w, r.h) < 50;
           const name = it.category === "custom" ? p.name.slice(0, 10) : SHORT[it.category] ?? "";
+          const icon = ICONS[it.category] ?? "📦";
           return (
             <G key={it.uid}>
               {it.category === "floor_lamp" || it.category === "planter" ? (
@@ -91,7 +162,9 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, showD
               ) : (
                 <Rect x={r.x} y={r.y} width={r.w} height={r.h} rx={soft ? 2 : Math.min(r.w, r.h) / 8} fill={catFill(colors, it.category)} opacity={it.category === "rug" ? 0.7 : 1} stroke={sel ? colors.brandPrimary : colors.onSurfaceTertiary} strokeWidth={sel ? wallW * 0.8 : wallW / 4} strokeDasharray={soft && !sel ? `${fs / 2} ${fs / 3}` : undefined} />
               )}
-              {!soft && name ? (
+              {editable ? (
+                <SvgText x={r.x + r.w / 2} y={r.y + r.h / 2 + fs * 0.26} fontSize={Math.min(fs * 1.5, Math.min(r.w, r.h) * 0.7)} fill={colors.onSurface} textAnchor="middle">{icon}</SvgText>
+              ) : !soft && name ? (
                 <>
                   <SvgText x={r.x + r.w / 2} y={r.y + r.h / 2 - (small ? 0 : fs * 0.15)} fontSize={small ? fs * 0.55 : fs * 0.8} fontFamily={fonts.text} fontWeight="600" fill={colors.onSurface} textAnchor="middle">
                     {name}
@@ -122,12 +195,28 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, showD
             const p = getProduct(it.productId);
             if (!p) return null;
             const r = footprint(it, p, g);
-            return (
+            const original = originalByUid.get(it.uid) ?? it;
+            return editable && onMoveItem ? (
+              <DragHandle key={`hit-${it.uid}`}
+                rect={footprint(original, p, g)} vw={VW} vh={VH} margin={M} pxWidth={pixelWidth}
+                testID={`${testID ?? "plan"}-item-${it.uid}`} label={p.name}
+                onTap={() => { setPreview(null); onPressItem?.(it.uid); }}
+                onDrag={(dx, dy) => {
+                  setPreview({ uid: it.uid, cx: original.cx + dx, cy: original.cy + dy });
+                }}
+                onDrop={(dx, dy) => {
+                  setPreview(null);
+                  onMoveItem(it.uid, original.cx + dx, original.cy + dy);
+                }}
+                onCancel={() => setPreview(null)}
+                onDragStateChange={onDragStateChange}
+              />
+            ) : (
               <Pressable
                 key={`hit-${it.uid}`}
                 testID={`${testID ?? "plan"}-item-${it.uid}`}
                 accessibilityLabel={p.name}
-                onPress={() => onPressItem(it.uid)}
+                onPress={() => onPressItem?.(it.uid)}
                 style={{ position: "absolute", left: `${((r.x + M) / VW) * 100}%`, top: `${((r.y + M) / VH) * 100}%`, width: `${(r.w / VW) * 100}%`, height: `${(r.h / VH) * 100}%` }}
               />
             );
