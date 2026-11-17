@@ -24,6 +24,7 @@ export interface PlanState {
   inspirations: string[];
   budget: number; // current room cap for solver
   apartmentBudget: number; // shared spending limit across selected rooms
+  roomBudgetOverrides: Record<string, number> | null; // null = automatic split; map = explicit room caps
   allocations: Partial<Record<CategoryId, number>>;
   categoryBudgets: Partial<Record<CategoryId, number>>;
   layouts: Layout[] | null;
@@ -119,6 +120,7 @@ export const initialState = (): PlanState => ({
   inspirations: [],
   budget: 2500,
   apartmentBudget: 2500,
+  roomBudgetOverrides: null,
   categoryBudgets: {},
   allocations: Object.fromEntries(CATEGORIES.map((c) => [c.id, c.defaultPct])),
   layouts: null,
@@ -151,22 +153,29 @@ export function rebalanceRoomBudgets(s: PlanState): PlanState {
   const ids = s.selectedRoomIds;
   if (!ids.length) return { ...s, budget: s.apartmentBudget };
   const existing = configsOf(s);
+  // Once the user edits an individual room budget, preserve that manual amount.
+  // The sum can be below the apartment budget; the remainder is unallocated.
+  const manual = s.roomBudgetOverrides;
   const weights = ids.map(id => {
     const cfg = existing[id];
     const targets = Object.values(cfg?.categoryBudgets ?? {}).reduce((a, v) => a + Math.max(0, v ?? 0), 0);
     const custom = cfg?.customItems.reduce((a, x) => a + x.price, 0) ?? 0;
     return Math.max(1, targets ? targets + custom : cfg?.budget ?? s.budget);
   });
-  const total = weights.reduce((a,b) => a+b,0);
-  let used = 0;
+  const total = weights.reduce((a, b) => a + b, 0);
   const progress = { ...s.roomProgress };
-  ids.forEach((id,index) => {
+  let used = 0;
+  ids.forEach((id, index) => {
     const room = s.apartment.rooms.find(r => r.id === id);
     const cfg = existing[id] ?? {
       needsKind: room?.kind ?? null, needs: defaultNeeds(room?.kind ?? "living", s.apartment.homeType),
       customItems: [], budget: s.budget, allocations: s.allocations, categoryBudgets: {},
     };
-    const cap = index === ids.length-1 ? s.apartmentBudget - used : Math.round(s.apartmentBudget*weights[index]/total);
+    const cap = manual
+      ? Math.max(0, Math.round(manual[id] ?? 0))
+      : index === ids.length - 1
+        ? s.apartmentBudget - used
+        : Math.round(s.apartmentBudget * weights[index] / total);
     used += cap;
     progress[id] = {
       roomKind: room?.kind ?? null, ...(progress[id] ?? {}), ...cfg, categoryBudgets: cfg.categoryBudgets ?? {},
@@ -196,6 +205,7 @@ export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<
       : s.budget;
   }
   s.categoryBudgets = s.categoryBudgets ?? {};
+  s.roomBudgetOverrides = saved.roomBudgetOverrides ?? null;
   for (const [id, config] of Object.entries(saved.roomConfigs ?? {})) {
     if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, categoryBudgets: config.categoryBudgets ?? {}, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {} };
   }
@@ -234,6 +244,7 @@ interface Ctx {
   geom: RoomGeom | null;
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
   setApartmentBudget: (amount: number) => void;
+  setRoomBudgets: (changes: Record<string, number>) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
   selectRoom: (id: string) => void;
   startRooms: () => void;
@@ -308,7 +319,27 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [setState]);
 
   const setApartmentBudget = useCallback((amount: number) => {
-    setState(s => rebalanceRoomBudgets({ ...s, apartmentBudget: amount, realSelections: {} }));
+    setState(s => {
+      const allocated = s.selectedRoomIds.reduce((sum, id) => sum + (s.roomBudgetOverrides?.[id] ?? 0), 0);
+      if (amount < allocated) return s; // Room allocations must fit under the total.
+      return rebalanceRoomBudgets({ ...s, apartmentBudget: amount, realSelections: {} });
+    });
+  }, [setState]);
+
+  const setRoomBudgets = useCallback((changes: Record<string, number>) => {
+    setState(s => {
+      // Freeze the current automatic split on the first manual adjustment.
+      const automatic = rebalanceRoomBudgets({ ...s, roomBudgetOverrides: null });
+      const current = Object.fromEntries(s.selectedRoomIds.map(id =>
+        [id, s.roomBudgetOverrides?.[id] ?? automatic.roomProgress[id]?.budget ?? 0]));
+      for (const [id, amount] of Object.entries(changes)) {
+        if (!s.selectedRoomIds.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
+        current[id] = Math.round(amount);
+      }
+      const total = Object.values(current).reduce((sum, amount) => sum + amount, 0);
+      if (total > s.apartmentBudget) return s;
+      return rebalanceRoomBudgets({ ...s, roomBudgetOverrides: current, realSelections: {} });
+    });
   }, [setState]);
 
   /** Any change to the apartment geometry invalidates layouts and the furnished plan. */
@@ -316,7 +347,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     setState((s) => {
       const apartment = fn(s.apartment);
       const keepRoom = apartment.rooms.some((r) => r.id === s.selectedRoomId);
-      return { ...s, apartment, selectedRoomId: keepRoom ? s.selectedRoomId : null,
+      return { ...s, apartment, roomBudgetOverrides: null, selectedRoomId: keepRoom ? s.selectedRoomId : null,
         selectedRoomIds: s.selectedRoomIds.filter(id => apartment.rooms.some(r => r.id === id && FURNISHABLE.includes(r.kind))),
         roomProgress: {}, layouts: null, selectedLayoutId: null, plan: null, realSelections: {} };
     });
@@ -374,8 +405,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const loadDemo = useCallback(() => setState(demoState()), [setState]);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartmentBudget, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
-    [state, ready, geom, update, setApartmentBudget, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartmentBudget, setRoomBudgets, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
+    [state, ready, geom, update, setApartmentBudget, setRoomBudgets, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
