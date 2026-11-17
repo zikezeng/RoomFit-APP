@@ -76,7 +76,6 @@ export interface Scene3DColors {
 }
 
 const ROT: Record<Facing, number> = { down: 0, right: Math.PI / 2, up: Math.PI, left: -Math.PI / 2 };
-const FRONT: Record<Facing, Pt> = { down: { x: 0, y: 1 }, up: { x: 0, y: -1 }, right: { x: 1, y: 0 }, left: { x: -1, y: 0 } };
 
 /** Layout and real choices of one room, whether it is the room being edited or one finished earlier. */
 export function roomPlanOf(state: PlanState, roomId: string): { plan: PlacedItem[]; real: Record<string, RealProductSelection> } {
@@ -97,7 +96,20 @@ function itemsOfRoom(state: PlanState, roomId: string, colors: Scene3DColors, pl
   const totals: Record<string, number> = {};
   const seen: Record<string, number> = {};
   plan.forEach((it) => (totals[it.category] = (totals[it.category] ?? 0) + 1));
-  return plan.map((it) => {
+  // Run the fit check for every chosen product first: it may slide the piece and move neighbours out
+  // of the way. Those moves are applied below so the 3D room shows the rearranged result.
+  const realOf = (u: string) => real[u]?.details;
+  const fits: Record<string, ReturnType<typeof fitCheck>> = {};
+  const moved: Record<string, { cx: number; cy: number }> = {};
+  for (const it of plan) {
+    const sel = real[it.uid];
+    if (!sel) continue;
+    const f = fitCheck(sel.details, { geom, item: it, others: plan, realOf });
+    fits[it.uid] = f;
+    Object.assign(moved, f.moves ?? {});
+  }
+  return plan.map((planned) => {
+    const it = moved[planned.uid] ? { ...planned, ...moved[planned.uid] } : planned;
     const p = getProduct(it.productId);
     const r = footprint(it, p, geom);
     const c = place({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
@@ -114,23 +126,23 @@ function itemsOfRoom(state: PlanState, roomId: string, colors: Scene3DColors, pl
       const dt = sel.details;
       const out: Scene3DItem = { ...base, ...shapeHints(p.category, sel.title), status: "real", title: sel.title, image: sel.image, priceText, retailer: sel.retailer, url: sel.url };
       out.color = productColor(sel) ?? base.color;
-      const fit = fitCheck(dt, { width: p.width, depth: p.depth });
+      const fit = fits[it.uid] ?? fitCheck(dt, { geom, item: it, others: plan, realOf });
       out.sizeText = sizeText(dt);
       out.fit = fit.level;
       out.fitText = fit.text;
       if (dt && hasRealSize(dt)) {
-        // Draw the product at its real size where we know it. A piece that stands against a wall keeps
-        // its back on that wall, so a deeper product grows into the room, the way it would in real life.
-        const depth = dt.depth ?? p.depth;
-        out.w = (dt.width ?? p.width) * k;
-        out.d = depth * k;
+        // Draw the product at its real size where we know it, at the spot the fit check settled on
+        // (slid along its wall when it is wider than planned). A piece against a wall keeps its back on
+        // that wall, so a deeper product grows into the room, the way it would in real life.
+        const real = { ...p, width: dt.width ?? p.width, depth: dt.depth ?? p.depth };
+        const rr = footprint({ ...it, ...(fit.at ?? {}) }, real, geom);
+        const cc = place({ x: rr.x + rr.w / 2, y: rr.y + rr.h / 2 });
+        out.x = cc.x;
+        out.z = cc.y;
+        out.w = real.width * k;
+        out.d = real.depth * k;
         out.h = (dt.height ?? p.height) * k;
         out.realSize = true;
-        if (it.wall !== null) {
-          const push = ((depth - p.depth) / 2) * k;
-          out.x += FRONT[it.facing].x * push;
-          out.z += FRONT[it.facing].y * push;
-        }
       }
       return out;
     }

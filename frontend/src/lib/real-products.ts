@@ -34,15 +34,17 @@ export async function searchRealProducts(input: {
   category: CategoryId;
   styles: StyleId[];
   moods: MoodId[];
-  referencePrice: number;
+  /** Price limit for this spot (USD), from the real remaining budget. null = no limit in the search. */
+  maxPrice: number | null;
 }): Promise<RealShoppingProduct[]> {
   if (!API) throw new Error("RoomFit backend URL is not configured.");
 
   const category = CATEGORY_MAP[input.category]?.label ?? input.category;
   const style = input.styles[0] ? STYLE_LABEL[input.styles[0]] : "";
   const mood = input.moods[0] ? MOOD_LABEL[input.moods[0]] : "";
-  const maxPrice = Math.max(100, Math.round(input.referencePrice * 1.35));
-  const query = [style, mood, category, "furniture", `under $${maxPrice}`].filter(Boolean).join(" ");
+  // Round up to a friendly number; very small shares are dropped so the search is not starved.
+  const cap = input.maxPrice !== null && input.maxPrice >= 30 ? Math.ceil(input.maxPrice / 10) * 10 : null;
+  const query = [style, mood, category, "furniture", cap ? `under $${cap}` : ""].filter(Boolean).join(" ");
 
   const res = await fetch(
     `${API}/api/products/search?q=${encodeURIComponent(query)}&limit=6`,

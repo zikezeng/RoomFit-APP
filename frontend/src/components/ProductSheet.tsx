@@ -10,6 +10,7 @@ import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
 import { buildGeom } from "@/src/lib/apartment";
 import { fitCheck, sizeText } from "@/src/lib/product-fit";
+import { spotBudget } from "@/src/lib/shopping-totals";
 import { LOADING_DETAILS, NO_DETAILS, RealShoppingProduct, fetchProductDetails, searchRealProducts } from "@/src/lib/real-products";
 import { RealProductSelection } from "@/src/lib/types";
 import { configsOf, usePlan } from "@/src/state/plan-store";
@@ -36,6 +37,9 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     latest.current = state;
   });
   const isCustom = p?.category === "custom";
+  const roomPlan = (state.plan ?? []).filter((i) => (i.roomId ?? state.selectedRoomId) === roomId);
+  // This spot's share of the money still left in the room budget — the price limit for the search.
+  const spotCap = item ? spotBudget(roomPlan, state.realSelections, item.uid, budget) : null;
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
@@ -57,7 +61,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
       category: p.category,
       styles: state.styles,
       moods: state.moods,
-      referencePrice: p.price,
+      maxPrice: spotCap,
     })
       .then((products) => {
         if (active) setRealProducts(products);
@@ -75,7 +79,8 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     return () => {
       active = false;
     };
-  }, [p?.id, p?.category, p?.price, state.styles.join("|"), state.moods.join("|")]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.id, p?.category, spotCap === null ? null : Math.ceil(spotCap / 10), state.styles.join("|"), state.moods.join("|")]);
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;
@@ -186,12 +191,12 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                 <Text style={s.specK}>Real size of this product</Text>
                 <Text style={s.specV}>{sizeText(selectedReal.details)}</Text>
                 {(() => {
-                  const fit = fitCheck(selectedReal.details, { width: p.width, depth: p.depth });
-                  return <Text style={[s.caption, { color: fit.level === "ok" ? colors.success : fit.level === "warn" ? colors.error : colors.muted }]} testID="product-sheet-fit">{fit.text}</Text>;
+                  const fit = fitCheck(selectedReal.details, { geom, item: item!, others: roomPlan, realOf: (u) => state.realSelections[u]?.details });
+                  return <Text style={[s.caption, { color: fit.level === "ok" ? colors.success : fit.level === "warn" ? colors.error : colors.muted }]} testID="product-sheet-fit">{fit.text}{fit.note ? ` ${fit.note}` : ""}</Text>;
                 })()}
               </View>
             ) : null}
-            <Text style={s.caption}>{isCustom ? "Size of your own item:" : "Space this piece has in your layout — check a product's size against it before buying:"}</Text>
+            <Text style={s.caption}>{isCustom ? "Size of your own item:" : "Planned spot in your layout — a starting point, not a size limit. A product fits if it is no longer than its wall and keeps the door clear:"}</Text>
             <View style={s.specs}>
               {[
                 ["Width", p.width],
@@ -211,7 +216,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
             <View style={s.sectionBlock}>
               <Text style={s.section}>Shop real products</Text>
               <Text style={s.caption}>
-                Live product data via Google Shopping, matched to this furniture type, your selected style, mood and approximate price. Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
+                Live product data via Google Shopping, matched to this furniture type and your selected style and mood{spotCap !== null && spotCap >= 30 ? `, up to about $${Math.ceil(spotCap / 10) * 10} (this piece's share of the budget left in this room)` : ", with no price limit because this room's budget is used up"}. Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
               </Text>
               {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
               {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
