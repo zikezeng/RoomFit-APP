@@ -28,6 +28,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const budget = configsOf(state)[roomId!]?.budget ?? state.budget;
   const p = item ? getProduct(item.productId) : null;
   const selectedReal = uid ? state.realSelections[uid] : undefined;
+  const isCustom = p?.category === "custom";
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
@@ -103,20 +104,51 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
         {p && item ? (
           <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
             <View style={s.headRow}>
-              <ProductSwatch category={p.category} style={p.styles[0]} size={96} />
+              {selectedReal?.image ? (
+                <Image source={{ uri: selectedReal.image }} style={s.headImage} contentFit="cover" transition={150} />
+              ) : (
+                <ProductSwatch category={p.category} style={p.styles[0]} size={96} />
+              )}
               <View style={{ flex: 1, gap: 4 }}>
-                <Text style={s.cat}>{CATEGORY_MAP[p.category].label}</Text>
-                <Text style={s.name} testID="product-sheet-name">
-                  {p.name}
+                <Text style={s.cat}>{isCustom ? CATEGORY_MAP[p.category].label : selectedReal ? CATEGORY_MAP[p.category].label : "Choose a product"}</Text>
+                <Text style={s.name} numberOfLines={3} testID="product-sheet-name">
+                  {selectedReal ? selectedReal.title : isCustom ? p.name : CATEGORY_MAP[p.category].label}
                 </Text>
-                <Text style={s.price} testID="product-sheet-price">
-                  {money(p.price)}
-                </Text>
+                {selectedReal ? (
+                  <Text style={s.price} testID="product-sheet-price">
+                    {selectedReal.price_text ?? (selectedReal.price !== null ? money(selectedReal.price) : "See price")}
+                  </Text>
+                ) : isCustom ? (
+                  <Text style={s.price} testID="product-sheet-price">
+                    {money(p.price)}
+                  </Text>
+                ) : (
+                  <Text style={s.caption}>Nothing chosen yet — pick a real product below.</Text>
+                )}
               </View>
               <Pressable onPress={onClose} testID="product-sheet-close" hitSlop={10} style={s.close}>
                 <Feather name="x" size={20} color={colors.onSurface} />
               </Pressable>
             </View>
+            {selectedReal ? (
+              <>
+                <View style={s.retail}>
+                  <Feather name="shopping-bag" size={16} color={colors.muted} />
+                  <Text style={s.desc} testID="product-sheet-retailer">
+                    {selectedReal.retailer}
+                  </Text>
+                </View>
+                <Button
+                  kind="secondary"
+                  small
+                  label={selectedReal.direct_retailer ? "View at retailer" : "Buying options"}
+                  icon="external-link"
+                  onPress={() => Linking.openURL(selectedReal.url)}
+                  testID="product-sheet-link"
+                />
+              </>
+            ) : null}
+            <Text style={s.caption}>{isCustom ? "Size of your own item:" : "Space this piece has in your layout — check a product's size against it before buying:"}</Text>
             <View style={s.specs}>
               {[
                 ["Width", p.width],
@@ -131,26 +163,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                 </View>
               ))}
             </View>
-            <View style={s.tags}>
-              {p.styles.map((st) => (
-                <Text key={st} style={s.tag}>
-                  {STYLE_LABEL[st]}
-                </Text>
-              ))}
-              <Text style={s.tag}>{p.mood}</Text>
-            </View>
-            <Text style={s.desc}>{p.description}</Text>
-            <View style={s.retail}>
-              <Feather name="shopping-bag" size={16} color={colors.muted} />
-              <Text style={s.desc} testID="product-sheet-retailer">
-                {p.retailer}
-              </Text>
-            </View>
-            {p.url ? (
-              <Button kind="secondary" small label="View at retailer" icon="external-link" onPress={() => Linking.openURL(p.url!)} testID="product-sheet-link" />
-            ) : (
-              <Text style={s.caption}>This planning item uses verified demo dimensions. Live products you can actually shop appear below.</Text>
-            )}
+            {isCustom ? <Text style={s.desc}>{p.description}</Text> : null}
 
             <View style={s.sectionBlock}>
               <Text style={s.section}>Shop real products</Text>
@@ -248,6 +261,7 @@ const useStyles = makeStyles((c) => ({
   sheet: { maxHeight: "82%", backgroundColor: c.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   handle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: c.borderStrong, marginBottom: spacing.md },
   headRow: { flexDirection: "row", gap: spacing.lg, alignItems: "center" },
+  headImage: { width: 96, height: 96, borderRadius: radius.md, backgroundColor: c.surfaceTertiary },
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center", alignSelf: "flex-start" },
   cat: { fontFamily: fonts.text, fontSize: 12, color: c.muted, textTransform: "uppercase", letterSpacing: 1 },
   name: { fontFamily: fonts.display, fontSize: 22, color: c.onSurface },
@@ -256,8 +270,6 @@ const useStyles = makeStyles((c) => ({
   spec: { flex: 1, backgroundColor: c.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: c.border },
   specK: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   specV: { fontFamily: fonts.text, fontSize: 16, fontWeight: "600", color: c.onSurface },
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  tag: { fontFamily: fonts.text, fontSize: 12, color: c.onBrandTertiary, backgroundColor: c.brandTertiary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, overflow: "hidden", textTransform: "capitalize" },
   desc: { fontFamily: fonts.text, fontSize: 14, lineHeight: 21, color: c.onSurfaceTertiary },
   retail: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   caption: { fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },

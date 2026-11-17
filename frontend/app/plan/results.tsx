@@ -135,7 +135,7 @@ export default function ResultsStep() {
             <View style={s.priceBlock}>
               <Text style={s.price}>{money(real?.price ?? p.price)}</Text>
               {real?.url ? (
-                <Button small kind="ghost" label="View product" icon="external-link" onPress={() => Linking.openURL(real.url)} />
+                <Button small kind="ghost" label="View product" icon="external-link" onPress={() => Linking.openURL(real.url)} testID={`result-product-link-${i}`} />
               ) : null}
             </View>
           </Card>
