@@ -89,6 +89,7 @@ export default function ShopStep() {
                 {statusText}
               </Text>
             </View>
+            <Button kind="secondary" small label="Preview in 3D" icon="box" onPress={() => router.push("/plan/preview3d")} testID="shop-preview3d-button" style={{ marginTop: spacing.md }} />
           </Card>
           <View style={s.hRow}>
             <Text style={s.h}>Selected furniture</Text>
