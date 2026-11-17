@@ -28,7 +28,7 @@ export default function ShopStep() {
     <WizardScaffold
       step={8}
       title="Shop Your Room"
-      subtitle="Tap any piece on the floor plan to see details and swap alternatives."
+      subtitle="Tap each layout item to choose a real product to buy, or use a layout-safe alternative with verified dimensions."
       cta={plan ? { label: "View final plan", icon: "check", onPress: () => router.push("/plan/results"), testID: "shop-continue-button" } : undefined}
       header={v ? <BudgetBar total={v.total} budget={totalBudget(state)} /> : undefined}
     >
