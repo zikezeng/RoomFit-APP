@@ -3,7 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { buildGeom, RoomGeom, sampleApartment } from "@/src/lib/apartment";
 import { CATEGORIES, FURNISHABLE, setCustomProducts } from "@/src/lib/catalog";
 import { generateLayouts, trySwap } from "@/src/lib/solver";
-import { Apartment, CategoryId, HomeType, Layout, MoodId, Need, PlacedItem, Product, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
+import { Apartment, CategoryId, HomeType, Layout, MoodId, Need, PlacedItem, Product, RealProductSelection, RoomKind, RoomSpec, StyleId } from "@/src/lib/types";
 import { storage } from "@/src/utils/storage";
 
 export type RoomConfig = Pick<PlanState, "needsKind" | "needs" | "customItems" | "budget" | "allocations">;
@@ -28,14 +28,16 @@ export interface PlanState {
   seed: number;
   selectedLayoutId: string | null;
   plan: PlacedItem[] | null;
+  /** Final real-world product choices keyed by PlacedItem.uid. */
+  realSelections: Record<string, RealProductSelection>;
 }
 
-export type RoomProgress = Pick<PlanState, "roomKind" | "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "layouts" | "seed" | "selectedLayoutId" | "plan">;
+export type RoomProgress = Pick<PlanState, "roomKind" | "needsKind" | "needs" | "customItems" | "budget" | "allocations" | "layouts" | "seed" | "selectedLayoutId" | "plan" | "realSelections">;
 export const roomRank = (kind: RoomKind) => kind === "living" ? 0 : kind === "bedroom" ? 1 : FURNISHABLE.includes(kind) ? 2 : 3;
 export function saveRoom(s: PlanState): PlanState {
   if (!s.selectedRoomId) return s;
-  const { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan } = s;
-  return { ...s, roomProgress: { ...s.roomProgress, [s.selectedRoomId]: { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan } } };
+  const { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan, realSelections } = s;
+  return { ...s, roomProgress: { ...s.roomProgress, [s.selectedRoomId]: { roomKind, needsKind, needs, customItems, budget, allocations, layouts, seed, selectedLayoutId, plan, realSelections } } };
 }
 export function activateRoom(state: PlanState, id: string): PlanState {
   const s = saveRoom(state);
@@ -46,7 +48,7 @@ export function activateRoom(state: PlanState, id: string): PlanState {
   return saveRoom({ ...s, ...(saved?.roomKind === room.kind ? saved : {
     roomKind: room.kind, needsKind: room.kind, needs: defaultNeeds(room.kind, s.apartment.homeType),
     customItems: [], budget: defaults.budget, allocations: defaults.allocations,
-    layouts: null, seed: 0, selectedLayoutId: null, plan: null,
+    layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {},
   }), selectedRoomId: id });
 }
 export function toggleRoom(s: PlanState, id: string): PlanState {
@@ -119,6 +121,7 @@ export const initialState = (): PlanState => ({
   seed: 0,
   selectedLayoutId: null,
   plan: null,
+  realSelections: {},
 });
 
 /** Mia's demo — only loaded when the user explicitly taps "Try a Demo". */
@@ -140,11 +143,15 @@ export const itemCount = (c: RoomConfig) => c.customItems.length + Object.values
 /** Preserve sessions saved by either the single-room or simultaneous-room version. */
 export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<string, RoomConfig> }): PlanState {
   const s = { ...initialState(), ...saved, roomProgress: { ...saved.roomProgress } };
+  s.realSelections = saved.realSelections ?? {};
+  for (const [id, progress] of Object.entries(s.roomProgress)) {
+    s.roomProgress[id] = { ...progress, realSelections: progress.realSelections ?? {} };
+  }
   s.selectedRoomIds = (saved.selectedRoomIds ?? (saved.selectedRoomId ? [saved.selectedRoomId] : []))
     .filter(id => s.apartment.rooms.some(r => r.id === id && FURNISHABLE.includes(r.kind)))
     .sort((a, b) => roomRank(s.apartment.rooms.find(r => r.id === a)!.kind) - roomRank(s.apartment.rooms.find(r => r.id === b)!.kind));
   for (const [id, config] of Object.entries(saved.roomConfigs ?? {})) {
-    if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null };
+    if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {} };
   }
   if (saved.plan?.some(item => item.roomId)) {
     for (const id of s.selectedRoomIds) {
@@ -180,6 +187,8 @@ interface Ctx {
   generate: (seed: number) => void;
   selectLayout: (id: string) => void;
   swap: (uid: string, productId: string) => ReturnType<typeof trySwap> | null;
+  selectRealProduct: (uid: string, product: RealProductSelection) => void;
+  clearRealProduct: (uid: string) => void;
   reset: () => void;
   loadDemo: () => void;
 }
@@ -266,7 +275,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const selectLayout = useCallback((id: string) => {
     setState((s) => {
       const l = s.layouts?.find((x) => x.id === id);
-      return l ? { ...s, selectedLayoutId: id, plan: l.items.map((i) => ({ ...i })) } : s;
+      return l ? { ...s, selectedLayoutId: id, plan: l.items.map((i) => ({ ...i })), realSelections: {} } : s;
     });
   }, [setState]);
 
@@ -278,16 +287,32 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (!g || !s.plan) return null;
     const items = s.plan.filter((i) => (i.roomId ?? s.selectedRoomId) === id);
     const r = trySwap(g, items, uid, productId, configsOf(s)[id!]?.budget ?? s.budget);
-    if (r.valid) setState((p) => ({ ...p, plan: p.plan!.map((i) => r.items.find((x) => x.uid === i.uid) ?? i) }));
+    if (r.valid) setState((p) => {
+      const realSelections = { ...p.realSelections };
+      delete realSelections[uid];
+      return { ...p, plan: p.plan!.map((i) => r.items.find((x) => x.uid === i.uid) ?? i), realSelections };
+    });
     return r;
+  }, [setState]);
+
+  const selectRealProduct = useCallback((uid: string, product: RealProductSelection) => {
+    setState((s) => ({ ...s, realSelections: { ...s.realSelections, [uid]: product } }));
+  }, [setState]);
+
+  const clearRealProduct = useCallback((uid: string) => {
+    setState((s) => {
+      const realSelections = { ...s.realSelections };
+      delete realSelections[uid];
+      return { ...s, realSelections };
+    });
   }, [setState]);
 
   const reset = useCallback(() => setState(initialState()), [setState]);
   const loadDemo = useCallback(() => setState(demoState()), [setState]);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, reset, loadDemo }),
-    [state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
+    [state, ready, geom, update, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
