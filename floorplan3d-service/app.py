@@ -13,11 +13,15 @@ Routes (all under /api, like the original RoomFit backend):
 
 import base64
 import hashlib
+import json
 import os
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import cv2
 import numpy as np
@@ -89,7 +93,96 @@ class Model3DIn(ImageIn):
 
 @api.get("/")
 def health():
-    return {"ok": True, "model_loaded": _recognizer is not None}
+    return {
+        "ok": True,
+        "model_loaded": _recognizer is not None,
+        "shopping_configured": bool(os.environ.get("SERPAPI_KEY")),
+    }
+
+
+@api.get("/products/search")
+def product_search(q: str, limit: int = 8):
+    """Search live US shopping listings without exposing the SerpAPI key to the app."""
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(400, "Search query is too short.")
+    limit = max(1, min(limit, 12))
+
+    api_key = os.environ.get("SERPAPI_KEY")
+    if not api_key:
+        raise HTTPException(
+            503,
+            "Real shopping search is not configured. Add SERPAPI_KEY to floorplan3d-service/.env and restart the server.",
+        )
+
+    params = urlencode({
+        "engine": "google_shopping_light",
+        "q": query,
+        "gl": "us",
+        "hl": "en",
+        "api_key": api_key,
+    })
+    req = Request(
+        f"https://serpapi.com/search.json?{params}",
+        headers={"User-Agent": "RoomFit/1.0"},
+    )
+    try:
+        with urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        raise HTTPException(502, f"Shopping provider returned HTTP {e.code}.")
+    except (URLError, TimeoutError, json.JSONDecodeError):
+        raise HTTPException(502, "Could not reach the shopping provider.")
+
+    if payload.get("error"):
+        raise HTTPException(502, str(payload["error"]))
+
+    rows = [
+        *payload.get("inline_shopping_results", []),
+        *payload.get("shopping_results", []),
+    ]
+    products = []
+    seen = set()
+    for row in rows:
+        title = str(row.get("title") or "").strip()
+        retailer = str(row.get("source") or "").strip()
+        direct_url = row.get("link")
+        url = direct_url or row.get("product_link")
+        if not title or not url:
+            continue
+
+        dedupe = (title.lower(), retailer.lower())
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+
+        price = row.get("extracted_price")
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+
+        products.append({
+            "id": str(row.get("product_id") or hashlib.sha1(str(url).encode()).hexdigest()[:16]),
+            "title": title,
+            "price": price,
+            "price_text": row.get("price"),
+            "retailer": retailer or "Google Shopping",
+            "url": str(url),
+            "image": row.get("thumbnail") or row.get("serpapi_thumbnail"),
+            "rating": row.get("rating"),
+            "reviews": row.get("reviews"),
+            "delivery": row.get("delivery"),
+            "direct_retailer": bool(direct_url),
+        })
+        if len(products) >= limit:
+            break
+
+    return {
+        "query": query,
+        "provider": "SerpAPI Google Shopping",
+        "products": products,
+    }
 
 
 @app.get("/")
