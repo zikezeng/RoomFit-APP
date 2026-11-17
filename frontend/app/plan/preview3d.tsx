@@ -104,8 +104,13 @@ export default function Preview3DStep() {
               {item.status === "unchosen" ? "Not chosen yet" : item.title}
             </Text>
             <Text style={s.k} testID="preview3d-item-detail">
-              {[item.retailer, item.priceText, `space ${Math.round(item.w)}×${Math.round(item.d)}×${Math.round(item.h)} cm`].filter(Boolean).join(" · ")}
+              {[item.retailer, item.priceText].filter(Boolean).join(" · ") || `Space in layout ${item.spaceW}×${item.spaceD} cm`}
             </Text>
+            {item.status === "real" ? (
+              <Text style={[s.k, item.fit === "warn" && { color: colors.error }, item.fit === "ok" && { color: colors.success }]} testID="preview3d-item-size">
+                Real size: {item.sizeText}. {item.fitText}
+              </Text>
+            ) : null}
             <View style={s.wrap}>
               {item.url ? <Button small kind="ghost" label="View product" icon="external-link" onPress={() => Linking.openURL(item.url!)} testID="preview3d-item-link" /> : null}
               {editable ? (
@@ -124,7 +129,7 @@ export default function Preview3DStep() {
       )}
 
       <Notice
-        text="Each piece is a simplified 3D shape drawn at the size and position it has in your layout. Shops do not provide 3D models, so the real product's photo and name are shown on its label instead."
+        text="Each piece is a simplified 3D shape at its place in your layout. Once you choose a real product, the shape takes that product's colour and, when the shop lists it, its real size. Shops do not provide 3D models, so the product's photo and name are shown on its label."
         testID="preview3d-note"
       />
       <ProductSheet uid={sheetUid} onClose={() => setSheetUid(null)} />

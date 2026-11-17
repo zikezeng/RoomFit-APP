@@ -1,6 +1,6 @@
 import Feather from "@react-native-vector-icons/feather";
 import { Image } from "expo-image";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -9,7 +9,9 @@ import { Button, Notice, money } from "@/src/components/ui";
 import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
 import { buildGeom } from "@/src/lib/apartment";
-import { RealShoppingProduct, searchRealProducts } from "@/src/lib/real-products";
+import { fitCheck, sizeText } from "@/src/lib/product-fit";
+import { LOADING_DETAILS, NO_DETAILS, RealShoppingProduct, fetchProductDetails, searchRealProducts } from "@/src/lib/real-products";
+import { RealProductSelection } from "@/src/lib/types";
 import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -28,6 +30,11 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const budget = configsOf(state)[roomId!]?.budget ?? state.budget;
   const p = item ? getProduct(item.productId) : null;
   const selectedReal = uid ? state.realSelections[uid] : undefined;
+  const latest = useRef(state);
+  const inFlight = useRef(new Set<string>());
+  useEffect(() => {
+    latest.current = state;
+  });
   const isCustom = p?.category === "custom";
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
@@ -83,9 +90,36 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     }
   };
 
+  // Look a selected product up once more for its real size and colour. If that fails it stays "size unknown".
+  const lookUp = (target: string, picked: RealProductSelection) => {
+    if (!picked.page_token || inFlight.current.has(target)) return;
+    inFlight.current.add(target);
+    const stillChosen = () => {
+      const cur = latest.current.realSelections[target];
+      return !!cur && cur.id === picked.id && cur.url === picked.url;
+    };
+    fetchProductDetails(picked.page_token)
+      .then((details) => stillChosen() && selectRealProduct(target, { ...picked, details }))
+      .catch(() => stillChosen() && selectRealProduct(target, { ...picked, details: NO_DETAILS }))
+      .finally(() => inFlight.current.delete(target));
+  };
+
+  // A lookup that never finished (app closed mid-way) is picked up again when the sheet opens.
+  const pendingId = uid && selectedReal?.details?.status === "loading" ? selectedReal.id : null;
+  useEffect(() => {
+    if (uid && pendingId) {
+      const cur = latest.current.realSelections[uid];
+      if (cur) lookUp(uid, cur);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, pendingId]);
+
   const chooseRealProduct = (rp: RealShoppingProduct) => {
     if (!item || !p) return;
-    selectRealProduct(item.uid, { ...rp, category: p.category });
+    const picked: RealProductSelection = { ...rp, category: p.category, details: rp.page_token ? LOADING_DETAILS : NO_DETAILS };
+    inFlight.current.delete(item.uid);
+    selectRealProduct(item.uid, picked);
+    lookUp(item.uid, picked);
     setMsg({ tone: "success", text: `Selected ${rp.title} for this layout position. Its shopping details will carry into your final plan and 3D handoff.` });
   };
 
@@ -146,6 +180,16 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                   testID="product-sheet-link"
                 />
               </>
+            ) : null}
+            {selectedReal ? (
+              <View style={s.realSize} testID="product-sheet-real-size">
+                <Text style={s.specK}>Real size of this product</Text>
+                <Text style={s.specV}>{sizeText(selectedReal.details)}</Text>
+                {(() => {
+                  const fit = fitCheck(selectedReal.details, { width: p.width, depth: p.depth });
+                  return <Text style={[s.caption, { color: fit.level === "ok" ? colors.success : fit.level === "warn" ? colors.error : colors.muted }]} testID="product-sheet-fit">{fit.text}</Text>;
+                })()}
+              </View>
             ) : null}
             <Text style={s.caption}>{isCustom ? "Size of your own item:" : "Space this piece has in your layout — check a product's size against it before buying:"}</Text>
             <View style={s.specs}>
@@ -268,6 +312,7 @@ const useStyles = makeStyles((c) => ({
   price: { fontFamily: fonts.text, fontSize: 18, fontWeight: "700", color: c.brandPrimary },
   specs: { flexDirection: "row", gap: spacing.sm },
   spec: { flex: 1, backgroundColor: c.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: c.border },
+  realSize: { gap: 2, backgroundColor: c.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: c.border },
   specK: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   specV: { fontFamily: fonts.text, fontSize: 16, fontWeight: "600", color: c.onSurface },
   desc: { fontFamily: fonts.text, fontSize: 14, lineHeight: 21, color: c.onSurfaceTertiary },

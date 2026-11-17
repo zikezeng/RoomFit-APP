@@ -12,6 +12,7 @@ import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
+import { fitCheck, sizeText } from "@/src/lib/product-fit";
 import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { validateLayout } from "@/src/lib/solver";
 import { usePlan } from "@/src/state/plan-store";
@@ -65,7 +66,7 @@ export default function ResultsStep() {
 
   const csv = () => {
     const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
-    const rows = [["Room", "Category", "Name", "Price (USD)", "Retailer", "Link", "Space in layout"]];
+    const rows = [["Room", "Category", "Name", "Price (USD)", "Retailer", "Link", "Space in layout", "Real size"]];
     products.forEach((p, i) => {
       const real = realSelections[i];
       const line = lines[i];
@@ -77,6 +78,7 @@ export default function ResultsStep() {
         line.status === "real" ? real!.retailer : line.status === "custom" ? "Your own item" : "",
         real?.url ?? "",
         `${p.width}×${p.depth}×${p.height} cm`,
+        line.status === "real" ? sizeText(real!.details) : "",
       ]);
     });
     rows.push(["", "", "TOTAL (chosen items)", String(total), "", "", ""], ["", "", "BUDGET", String(budget), "", "", ""], ["", "", "REMAINING", String(Math.round((budget - total) * 100) / 100), "", "", ""]);
@@ -159,6 +161,12 @@ export default function ResultsStep() {
               <Text style={s.k}>
                 {line.status === "real" ? real!.retailer : line.status === "custom" ? `Your own item · ${p.width}×${p.depth}×${p.height} cm` : "Not chosen yet · not in total"}
               </Text>
+              {line.status === "real" ? (
+                <Text style={[s.k, fitCheck(real!.details, { width: p.width, depth: p.depth }).level === "warn" && s.warn]} testID={`list-item-size-${resultItems[i].uid}`}>
+                  Real size: {sizeText(real!.details)}
+                  {fitCheck(real!.details, { width: p.width, depth: p.depth }).level === "warn" ? " — larger than its space in the layout" : ""}
+                </Text>
+              ) : null}
               {line.status !== "custom" ? <Text style={s.k}>Space in layout: {space}</Text> : null}
             </View>
             <View style={s.priceBlock}>
@@ -204,6 +212,7 @@ const useStyles = makeStyles((c) => ({
   stats: { flexDirection: "row", gap: spacing.sm },
   stat: { flex: 1, backgroundColor: c.surface, borderRadius: radius.md, padding: spacing.md },
   k: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
+  warn: { color: c.error },
   v: { fontFamily: fonts.text, fontSize: 17, fontWeight: "700", color: c.onSurface },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md },
   realThumb: { width: 56, height: 56, borderRadius: radius.md, backgroundColor: c.surfaceTertiary },

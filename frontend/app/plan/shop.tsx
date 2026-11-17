@@ -12,6 +12,7 @@ import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { validatePlan } from "@/src/lib/multi-room";
+import { fitCheck, sizeText } from "@/src/lib/product-fit";
 import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -138,7 +139,15 @@ export default function ShopStep() {
                   {selected ? (
                     <>
                       <Text style={s.caption}>{selected.retailer}</Text>
-                      <Text style={s.proxy}>Space in layout: {space}</Text>
+                      <Text style={s.proxy}>Real size: {sizeText(selected.details)}</Text>
+                      {(() => {
+                        const fit = fitCheck(selected.details, { width: p.width, depth: p.depth });
+                        return (
+                          <Text style={[s.proxy, fit.level === "warn" && { color: colors.error }, fit.level === "ok" && { color: colors.success }]} testID={`shop-item-fit-${it.uid}`}>
+                            {fit.level === "unknown" ? `Space in layout: ${space}` : fit.text}
+                          </Text>
+                        );
+                      })()}
                     </>
                   ) : (
                     <Text style={s.caption}>

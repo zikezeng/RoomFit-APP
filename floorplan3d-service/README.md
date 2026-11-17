@@ -67,7 +67,7 @@ SERPAPI_KEY=你的_key
 {"shopping_configured": true}
 ```
 
-Step 8 会通过 `GET /api/products/search?q=...` 搜索真实商品。当前版本只把这些结果作为购物发现层（图片、价格、商家、评分、链接）；真实商品在没有可靠尺寸数据前不会直接替换 layout，原有 solver 仍使用本地 demo catalog 的已知尺寸来保证布局校验。
+Step 8 会通过 `GET /api/products/search?q=...` 搜索真实商品。用户选中某件商品后，app 会再调用一次 `GET /api/products/detail?token=...`（SerpAPI `google_immersive_product`，每件选中的商品多用 1 次额度，结果在服务器内存里缓存 24 小时），尝试读出商品的长宽高和主色；读不到的部分返回 null，app 显示 "Size unknown"。当前版本只把这些结果作为购物发现层（图片、价格、商家、评分、链接）；真实商品在没有可靠尺寸数据前不会直接替换 layout，原有 solver 仍使用本地 demo catalog 的已知尺寸来保证布局校验。
 
 ## 注意
 
