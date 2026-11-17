@@ -1,7 +1,10 @@
-// Real size / colour / shape of a product chosen in Step 8, and whether it fits the space the layout
-// keeps for it. Used by the Step 8 list, the product sheet, the Step 9 list and the 3D preview so
+// Real size / colour / shape of a product chosen in Step 8, and whether it fits the room
+// (not longer than its wall, not blocking a door). Used by the Step 8 list, the product sheet, the Step 9 list and the 3D preview so
 // they all say the same thing.
-import { CategoryId, RealProductDetails, RealProductSelection } from "./types";
+import { pointInPoly, RoomGeom } from "./apartment";
+import { CATEGORY_MAP, getProduct } from "./catalog";
+import { footprint, rectsOverlap } from "./solver";
+import { CategoryId, PlacedItem, Pt, RealProductDetails, RealProductSelection, Rect } from "./types";
 
 const r = (n: number) => Math.round(n);
 
@@ -21,19 +24,99 @@ export function sizeText(d?: RealProductDetails | null): string {
 export interface FitResult {
   level: "ok" | "warn" | "unknown";
   text: string;
+  /** Where the piece ends up when it had to slide along its wall (room cm). Same as the layout spot when no move was needed. */
+  at?: { cx: number; cy: number };
+  /** Non-blocking hint, e.g. a neighbouring piece that would need to move a little. */
+  note?: string;
 }
 
-/** Compare the product's real footprint with the space (cm) the layout keeps for this piece. */
-export function fitCheck(d: RealProductDetails | null | undefined, space: { width: number; depth: number }): FitResult {
+/** Everything the check needs about the spot in the layout. */
+export interface FitContext {
+  geom: RoomGeom | null;
+  item: PlacedItem;
+  /** Layout item of the room, used only to say which neighbours would need to move. */
+  others: PlacedItem[];
+}
+
+// Rugs lie flat and mattresses sit in the bed frame: a door can swing over them.
+const FLAT = new Set<CategoryId>(["rug", "mattress"]);
+
+function insideRoom(rc: Rect, poly: Pt[]) {
+  const e = 0.5;
+  const pts = [
+    { x: rc.x + e, y: rc.y + e }, { x: rc.x + rc.w - e, y: rc.y + e }, { x: rc.x + e, y: rc.y + rc.h - e }, { x: rc.x + rc.w - e, y: rc.y + rc.h - e },
+    { x: rc.x + rc.w / 2, y: rc.y + rc.h / 2 },
+  ];
+  return pts.every((p) => pointInPoly(p, poly));
+}
+
+/**
+ * Can the real product go in this room at (or near) its spot? The rule is deliberately simple:
+ *   1. it must not be longer than the wall it stands against, and must stay inside the room;
+ *   2. it must not block a door.
+ * The planned spot from the layout is only a starting point, not a size limit. If the product is wider
+ * than the spot, we slide it along its wall (or nudge a free-standing piece) to the nearest place that
+ * satisfies both rules. Touching a neighbouring piece is reported as a note, not as a failure.
+ * When the depth is unknown we use the layout's depth and say so.
+ */
+export function fitCheck(d: RealProductDetails | null | undefined, ctx: FitContext): FitResult {
   if (!d || d.status === "loading") return { level: "unknown", text: "Checking size…" };
-  if (d.status !== "ok" || (d.width === null && d.depth === null)) return { level: "unknown", text: "Size unknown — check the product page before buying." };
-  const TOL = 3; // cm of slack before we warn
-  const over: string[] = [];
-  if (d.width !== null && d.width - space.width > TOL) over.push(`${r(d.width - space.width)} cm wider`);
-  if (d.depth !== null && d.depth - space.depth > TOL) over.push(`${r(d.depth - space.depth)} cm deeper`);
-  if (over.length) return { level: "warn", text: `${over.join(" and ")} than the ${r(space.width)}×${r(space.depth)} cm space in your layout — it may not fit.` };
-  if (d.width === null || d.depth === null) return { level: "unknown", text: `${d.width !== null ? "Width" : "Depth"} fits; the other side is unknown.` };
-  return { level: "ok", text: `Fits the ${r(space.width)}×${r(space.depth)} cm space in your layout.` };
+  if (d.status !== "ok" || d.width === null) {
+    return { level: "unknown", text: d.status === "ok" && d.depth !== null ? "Width unknown — check the product page before buying." : "Size unknown — check the product page before buying." };
+  }
+  const { geom: g, item } = ctx;
+  const proxy = getProduct(item.productId);
+  if (!g) return { level: "unknown", text: "Room shape unavailable — check the size yourself." };
+  const W = d.width;
+  const D = d.depth ?? proxy.depth;
+  const guessNote = d.depth === null ? " (depth unknown — checked with the planned depth)" : "";
+  const real = { ...proxy, width: W, depth: D };
+  const rectAt = (cx: number, cy: number) => footprint({ ...item, cx, cy }, real, g);
+  const blocksDoor = (rc: Rect) => !FLAT.has(proxy.category) && g.doors.some((dr) => rectsOverlap(rc, dr.zone));
+  const ws = item.wall !== null ? g.walls[item.wall] : undefined;
+
+  // Rule 1a: not longer than its wall; not deeper than the room is across.
+  if (ws) {
+    const wallLen = ws.s1 - ws.s0;
+    if (W > wallLen + 1) return { level: "warn", text: `${r(W - wallLen)} cm longer than this ${r(wallLen)} cm wall — it won't fit here.` };
+    const across = ws.axis === "h" ? g.length : g.width;
+    if (D > across - 1) return { level: "warn", text: `${r(D)} cm deep — deeper than the room is across (${r(across)} cm).${guessNote}` };
+  }
+
+  // Candidate spots: along the wall in 5 cm steps, or small nudges for a free-standing piece. Nearest first.
+  const cands: { cx: number; cy: number; dist: number }[] = [];
+  if (ws) {
+    const t0 = ws.axis === "h" ? item.cx : item.cy;
+    for (let t = ws.s0 + W / 2; t <= ws.s1 - W / 2 + 0.01; t += 5) cands.push({ cx: ws.axis === "h" ? t : item.cx, cy: ws.axis === "h" ? item.cy : t, dist: Math.abs(t - t0) });
+    // Keep the exact planned centre as an option when it is valid.
+    if (t0 - W / 2 >= ws.s0 - 0.5 && t0 + W / 2 <= ws.s1 + 0.5) cands.push({ cx: item.cx, cy: item.cy, dist: 0 });
+  } else {
+    for (let dx = -60; dx <= 60; dx += 10) for (let dy = -60; dy <= 60; dy += 10) cands.push({ cx: item.cx + dx, cy: item.cy + dy, dist: Math.hypot(dx, dy) });
+  }
+  cands.sort((a, b) => a.dist - b.dist);
+  const inRoom = cands.filter((c) => insideRoom(rectAt(c.cx, c.cy), g.poly));
+  if (!inRoom.length) return { level: "warn", text: ws ? `Doesn't fit along this wall.${guessNote}` : `Too big for the open floor in this room.${guessNote}` };
+  const best = inRoom.find((c) => !blocksDoor(rectAt(c.cx, c.cy)));
+  if (!best) return { level: "warn", text: `Would block the door wherever it goes on this ${ws ? "wall" : "spot"}.${guessNote}` };
+
+  // Neighbours it would touch (only a hint: those can usually be moved).
+  const rc = rectAt(best.cx, best.cy);
+  const touching = FLAT.has(proxy.category)
+    ? []
+    : ctx.others
+        .filter((o) => o.uid !== item.uid)
+        .map((o) => ({ o, p: getProduct(o.productId) }))
+        .filter(({ o, p }) => !FLAT.has(p.category) && rectsOverlap(rc, footprint(o, p, g)))
+        .map(({ p }) => (p.category === "custom" ? p.name : CATEGORY_MAP[p.category].label.toLowerCase()));
+  const counts = touching.reduce<Record<string, number>>((m, n) => ((m[n] = (m[n] ?? 0) + 1), m), {});
+  const uniq = Object.entries(counts).map(([n, c]) => (c > 1 ? `${c} ${n}s` : n));
+  const moved = best.dist > 4 ? ` Slide it about ${r(best.dist)} cm along the ${ws ? "wall" : "floor"} from the planned spot.` : "";
+  return {
+    level: "ok",
+    text: `Fits: inside the room and clear of the door.${moved}${guessNote}`,
+    at: { cx: best.cx, cy: best.cy },
+    note: uniq.length ? `It would touch the ${uniq.length > 1 ? `${uniq.slice(0, -1).join(", ")} and ${uniq[uniq.length - 1]}` : uniq[0]} — move ${touching.length > 1 ? "them" : "it"} a little.` : undefined,
+  };
 }
 
 // Colour words that show up in product titles and colour fields → a representative colour.

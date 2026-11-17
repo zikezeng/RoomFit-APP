@@ -52,3 +52,23 @@ export function budgetNote(t: ShoppingTotals, budget: number, fmt: (n: number) =
     .filter(Boolean)
     .join(" · ");
 }
+
+/**
+ * How much of the room budget this spot can use when searching for a product (USD).
+ * Money left = room budget − what the OTHER chosen pieces in the room cost (real prices; custom items at
+ * the price entered). That money is shared among the pieces still to choose (this one included) in
+ * proportion to their planned prices, so a bed gets a bigger share than a lamp. The planned (demo)
+ * price is used only as that weight, never as the limit itself. Returns null when no money is left.
+ */
+export function spotBudget(plan: PlacedItem[], real: Record<string, RealProductSelection | undefined>, uid: string, roomBudget: number): number | null {
+  const others = plan.filter((it) => it.uid !== uid);
+  const spentElsewhere = shoppingTotals(others.map((item) => ({ item, real: real[item.uid] }))).spent;
+  const left = roomBudget - spentElsewhere;
+  if (left <= 0) return null;
+  const open = plan.filter((it) => it.uid === uid || (!real[it.uid] && getProduct(it.productId).category !== "custom"));
+  const weight = (it: PlacedItem) => Math.max(1, getProduct(it.productId).price);
+  const total = open.reduce((s, it) => s + weight(it), 0);
+  const me = plan.find((it) => it.uid === uid);
+  if (!me || total <= 0) return null;
+  return Math.round((left * weight(me)) / total);
+}

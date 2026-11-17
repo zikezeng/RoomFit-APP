@@ -12,6 +12,7 @@ import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
+import { buildGeom } from "@/src/lib/apartment";
 import { fitCheck, sizeText } from "@/src/lib/product-fit";
 import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { validateLayout } from "@/src/lib/solver";
@@ -38,6 +39,8 @@ export default function ResultsStep() {
     })),
   );
   const resultItems = entries.map(e => e.item);
+  const geoms: Record<string, ReturnType<typeof buildGeom>> = {};
+  const geomOf = (id: string) => (id in geoms ? geoms[id] : (geoms[id] = buildGeom(state.apartment, id)));
   const products = resultItems.map(i => getProduct(i.productId));
   const realSelections = entries.map(e =>
     (e.roomId === state.selectedRoomId ? state.realSelections : state.roomProgress[e.roomId]?.realSelections ?? {})[e.item.uid],
@@ -161,13 +164,18 @@ export default function ResultsStep() {
               <Text style={s.k}>
                 {line.status === "real" ? real!.retailer : line.status === "custom" ? `Your own item · ${p.width}×${p.depth}×${p.height} cm` : "Not chosen yet · not in total"}
               </Text>
-              {line.status === "real" ? (
-                <Text style={[s.k, fitCheck(real!.details, { width: p.width, depth: p.depth }).level === "warn" && s.warn]} testID={`list-item-size-${resultItems[i].uid}`}>
-                  Real size: {sizeText(real!.details)}
-                  {fitCheck(real!.details, { width: p.width, depth: p.depth }).level === "warn" ? " — larger than its space in the layout" : ""}
-                </Text>
-              ) : null}
-              {line.status !== "custom" ? <Text style={s.k}>Space in layout: {space}</Text> : null}
+              {line.status === "real"
+                ? (() => {
+                    const fit = fitCheck(real!.details, { geom: geomOf(entries[i].roomId), item: entries[i].item, others: entries.filter((e) => e.roomId === entries[i].roomId).map((e) => e.item) });
+                    return (
+                      <Text style={[s.k, fit.level === "warn" && s.warn]} testID={`list-item-size-${resultItems[i].uid}`}>
+                        Real size: {sizeText(real!.details)}
+                        {fit.level === "warn" ? ` — ${fit.text}` : ""}
+                      </Text>
+                    );
+                  })()
+                : null}
+              {line.status === "unchosen" ? <Text style={s.k}>Planned spot: {space}</Text> : null}
             </View>
             <View style={s.priceBlock}>
               <Text style={s.price} testID={`list-item-price-${resultItems[i].uid}`}>
