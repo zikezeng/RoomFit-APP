@@ -177,8 +177,11 @@ export function rebalanceRoomBudgets(s: PlanState): PlanState {
         ? s.apartmentBudget - used
         : Math.round(s.apartmentBudget * weights[index] / total);
     used += cap;
+    const prev = progress[id] as RoomProgress | undefined;
+    // Same precedence as before: the config's own roomKind, else the saved room's, else the room type.
+    const roomKind = "roomKind" in cfg ? (cfg as RoomProgress).roomKind : prev && "roomKind" in prev ? prev.roomKind : room?.kind ?? null;
     progress[id] = {
-      roomKind: room?.kind ?? null, ...(progress[id] ?? {}), ...cfg, categoryBudgets: cfg.categoryBudgets ?? {},
+      ...(prev ?? ({} as RoomProgress)), ...cfg, roomKind, categoryBudgets: cfg.categoryBudgets ?? {},
       budget: cap, layouts: null, selectedLayoutId: null, plan: null,
     };
   });

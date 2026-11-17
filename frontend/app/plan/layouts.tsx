@@ -108,7 +108,7 @@ export default function LayoutsStep() {
       ) : !chosen?.valid ? (
         <Card testID="no-valid-layouts">
           <Notice tone="warning" text="The selected items do not fit safely. Try fewer or smaller items." />
-          <Button label="Edit furniture" kind="secondary" onPress={() => router.push("/plan/furniture")} />
+          <Button label="Edit furniture" kind="secondary" onPress={() => router.push("/plan/furniture")} testID="no-valid-layouts-edit-furniture" />
         </Card>
       ) : (
         <>
