@@ -116,6 +116,7 @@ export default function ResultsStep() {
       <Card style={{ gap: spacing.sm }}>
         {state.selectedRoomIds.length > 1 ? <CombinedPlan onPressItem={setUid} /> : <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />}
         <Notice tone={allOk ? "success" : "error"} text={validityText} testID="results-validity" />
+        <Button kind="secondary" label="See your room in 3D" icon="box" onPress={() => router.push("/plan/preview3d")} testID="results-preview3d-button" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
         <Text style={s.h}>Budget summary</Text>

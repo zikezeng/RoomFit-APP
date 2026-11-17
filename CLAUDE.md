@@ -32,6 +32,7 @@ memory/PRD.md          Product history and decisions so far.
 | 7. Layouts | `app/plan/layouts.tsx` |
 | 8. Shop / swap products | `app/plan/shop.tsx` |
 | 9. Results / shopping list | `app/plan/results.tsx` |
+| 9b. Furnished room in 3D | `app/plan/preview3d.tsx` |
 
 ### Shared files (changing these affects every page — coordinate with the team first)
 
@@ -46,6 +47,8 @@ memory/PRD.md          Product history and decisions so far.
 - `src/lib/solver.ts` — furniture layout solver (fit, walkways, door swing, budget).
 - `src/lib/catalog.ts` — demo product catalog. `src/lib/apartment.ts` — room geometry and names.
 - `src/lib/ai.ts` — calls `/api/floorplan/segment` during upload.
+- `src/lib/shopping-totals.ts` — the one place that adds up money for steps 8 and 9 (real choices only).
+- `src/lib/furnished3d.ts`, `src/components/Furnished3DView.tsx` — furnished 3D preview: builds the room + furniture scene from the chosen layout and `state.realSelections`, drawn with three.js in a WebView (iframe on web). No server needed.
 - `src/lib/floorplan3d.ts`, `src/components/Model3DView.tsx` — 3D page: calls `/api/floorplan/3d`, shows the .glb with `<model-viewer>` in a WebView (iframe on web).
 
 Page files also contain small pieces of logic (saving choices, navigation). When redesigning a page, keep those.
