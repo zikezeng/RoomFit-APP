@@ -1,6 +1,7 @@
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Platform, Share, Text, View } from "react-native";
+import { Linking, Platform, Share, Text, View } from "react-native";
 
 import { CombinedPlan } from "@/src/components/CombinedPlan";
 import { BudgetBar } from "@/src/components/BudgetBar";
@@ -27,16 +28,36 @@ export default function ResultsStep() {
   const allComplete = !!plan && state.selectedRoomIds.every(id => id === state.selectedRoomId || !!state.roomProgress[id]?.plan);
   const final = !hasNext && allComplete;
   const resultRooms = final ? state.selectedRoomIds : [state.selectedRoomId!];
-  const entries = resultRooms.flatMap(id => (id === state.selectedRoomId ? plan ?? [] : state.roomProgress[id]?.plan ?? []).map(item => ({ item, room: state.apartment.rooms.find(r => r.id === id)?.label ?? id })));
+  const entries = resultRooms.flatMap(id =>
+    (id === state.selectedRoomId ? plan ?? [] : state.roomProgress[id]?.plan ?? []).map(item => ({
+      item,
+      roomId: id,
+      room: state.apartment.rooms.find(r => r.id === id)?.label ?? id,
+    })),
+  );
   const resultItems = entries.map(e => e.item);
   const products = resultItems.map(i => getProduct(i.productId));
-  const total = products.reduce((sum, p) => sum + p.price, 0);
+  const realSelections = entries.map(e =>
+    (e.roomId === state.selectedRoomId ? state.realSelections : state.roomProgress[e.roomId]?.realSelections ?? {})[e.item.uid],
+  );
+  const total = products.reduce((sum, p, i) => sum + (realSelections[i]?.price ?? p.price), 0);
   const budget = resultRooms.reduce((sum, id) => sum + (id === state.selectedRoomId ? state.budget : state.roomProgress[id]?.budget ?? 0), 0);
 
   const csv = () => {
     const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
-    const rows = [["Room", "Category", "Name", "Width (cm)", "Depth (cm)", "Height (cm)", "Price (USD)", "Retailer", "Link"]];
-    products.forEach((p, i) => rows.push([entries[i].room, CATEGORY_MAP[p.category].label, p.name, String(p.width), String(p.depth), String(p.height), String(p.price), p.retailer, p.url ?? "Not verified (demo)"]));
+    const rows = [["Room", "Category", "Name", "Price (USD)", "Retailer", "Link", "Layout proxy size"]];
+    products.forEach((p, i) => {
+      const real = realSelections[i];
+      rows.push([
+        entries[i].room,
+        CATEGORY_MAP[p.category].label,
+        real?.title ?? p.name,
+        String(real?.price ?? p.price),
+        real?.retailer ?? p.retailer,
+        real?.url ?? p.url ?? "Not verified (demo)",
+        `${p.width}×${p.depth}×${p.height} cm`,
+      ]);
+    });
     rows.push(["", "", "TOTAL", "", "", "", String(total), "", ""], ["", "", "BUDGET", "", "", "", String(budget), "", ""]);
     return rows.map((r) => r.map(esc).join(",")).join("\n");
   };
@@ -55,7 +76,10 @@ export default function ResultsStep() {
   };
   const print = async () => {
     if (Platform.OS === "web") window.print();
-    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p) => `• ${p.name} — ${money(p.price)}`).join("\n") + `\nTotal ${money(total)} of ${money(budget)}` });
+    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p, i) => {
+      const real = realSelections[i];
+      return `• ${real?.title ?? p.name} — ${money(real?.price ?? p.price)}`;
+    }).join("\n") + `\nTotal ${money(total)} of ${money(budget)}` });
   };
 
   if (!plan || !v || !geom) {
@@ -92,19 +116,31 @@ export default function ResultsStep() {
         <BudgetBar total={total} budget={budget} />
       </Card>
       <Text style={s.h}>Shopping list</Text>
-      {products.map((p, i) => (
-        <Card key={`${entries[i].room}-${resultItems[i].uid}`} style={s.item} testID={`list-item-${resultItems[i].uid}`}>
-          <ProductSwatch category={p.category} style={p.styles[0]} size={56} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={s.name}>{p.name}</Text>
-            <Text style={s.k}>
-              {p.width}×{p.depth}×{p.height} cm · {p.retailer}
-            </Text>
-            <Text style={s.k}>{p.url ? p.url : "No verified link (demo product)"}</Text>
-          </View>
-          <Text style={s.price}>{money(p.price)}</Text>
-        </Card>
-      ))}
+      {products.map((p, i) => {
+        const real = realSelections[i];
+        return (
+          <Card key={`${entries[i].room}-${resultItems[i].uid}`} style={s.item} testID={`list-item-${resultItems[i].uid}`}>
+            {real?.image ? (
+              <Image source={{ uri: real.image }} style={s.realThumb} contentFit="cover" transition={120} />
+            ) : (
+              <ProductSwatch category={p.category} style={p.styles[0]} size={56} />
+            )}
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={s.name}>{real?.title ?? p.name}</Text>
+              <Text style={s.k}>
+                {real ? `${real.retailer} · Selected real product` : `${p.width}×${p.depth}×${p.height} cm · ${p.retailer}`}
+              </Text>
+              {real ? <Text style={s.k}>Layout proxy: {p.width}×{p.depth}×{p.height} cm</Text> : null}
+            </View>
+            <View style={s.priceBlock}>
+              <Text style={s.price}>{money(real?.price ?? p.price)}</Text>
+              {real?.url ? (
+                <Button small kind="ghost" label="View product" icon="external-link" onPress={() => Linking.openURL(real.url)} />
+              ) : null}
+            </View>
+          </Card>
+        );
+      })}
       {msg ? <Notice tone="success" text={msg} testID="results-message" /> : null}
       {final ? <View style={s.actions}>
         <Button small label="Download CSV" icon="download" onPress={download} testID="download-csv-button" style={s.action} />
@@ -137,7 +173,9 @@ const useStyles = makeStyles((c) => ({
   k: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   v: { fontFamily: fonts.text, fontSize: 17, fontWeight: "700", color: c.onSurface },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md },
+  realThumb: { width: 56, height: 56, borderRadius: radius.md, backgroundColor: c.surfaceTertiary },
   name: { fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface },
+  priceBlock: { alignItems: "flex-end", gap: spacing.xs },
   price: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.onSurface },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   action: { flexGrow: 1, flexBasis: "45%" },
