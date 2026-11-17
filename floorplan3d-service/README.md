@@ -48,6 +48,27 @@ EXPO_PUBLIC_BACKEND_URL=https://<你的用户名>-roomfit-3d.hf.space
 
 然后重新启动 Expo：`npx expo start --tunnel`，手机用 Expo Go 扫码。
 
+
+## Step 8：真实商品搜索（SerpAPI）
+
+RoomFit 的 Step 8 可以通过 SerpAPI 的 Google Shopping 搜索显示真实在售商品。API key 只放在这个 Python 服务里，不要写进 `frontend/.env` 或任何 `EXPO_PUBLIC_*` 变量。
+
+1. 在 SerpAPI 创建账号并获取 API key。
+2. 在 `floorplan3d-service` 文件夹新建 `.env`（这个文件已被 gitignore）：
+
+```
+SERPAPI_KEY=你的_key
+```
+
+3. 重新运行 `bash start_server_mac.command`。启动脚本会自动读取这个 `.env`。
+4. 浏览器打开 `http://localhost:8001/api/`，确认返回里有：
+
+```json
+{"shopping_configured": true}
+```
+
+Step 8 会通过 `GET /api/products/search?q=...` 搜索真实商品。当前版本只把这些结果作为购物发现层（图片、价格、商家、评分、链接）；真实商品在没有可靠尺寸数据前不会直接替换 layout，原有 solver 仍使用本地 demo catalog 的已知尺寸来保证布局校验。
+
 ## 注意
 
 - 免费服务器闲置约 48 小时后会休眠，下次访问要等 1 分钟左右唤醒；第一次生成 3D 也会比较慢（加载模型）。演示或录视频前，先打开一次 `/api/` 地址把它叫醒。
