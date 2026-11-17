@@ -142,7 +142,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
             <View style={s.sectionBlock}>
               <Text style={s.section}>Shop real products</Text>
               <Text style={s.caption}>
-                Live U.S. shopping matches based on this furniture type, your selected style, mood and approximate price. These products are for shopping discovery only until we verify their exact dimensions.
+                Live product data via Google Shopping, matched to this furniture type, your selected style, mood and approximate price. Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
               </Text>
               {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
               {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
@@ -168,7 +168,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                   <Button
                     small
                     kind="secondary"
-                    label={rp.direct_retailer ? "View at retailer" : "View product"}
+                    label={rp.direct_retailer ? "Shop now" : "View buying options"}
                     icon="external-link"
                     onPress={() => Linking.openURL(rp.url)}
                     testID={`real-product-link-${i}`}
@@ -179,7 +179,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
 
             {msg ? <Notice tone={msg.tone} text={msg.text} testID="swap-result-message" /> : null}
             <Text style={s.section}>Layout-safe alternatives</Text>
-            <Text style={s.caption}>Demo catalog options with known dimensions, ranked by style and re-checked against your room, door clearance, walkways and budget.</Text>
+            <Text style={s.caption}>Products with verified dimensions that can safely replace the current item. Each swap is re-checked against your room, door clearance, walkways and budget.</Text>
             {alts.map((a) => (
               <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
                 <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
