@@ -10,7 +10,7 @@ import { ProductSheet } from "@/src/components/ProductSheet";
 import { ProductSwatch } from "@/src/components/ProductSwatch";
 import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
-import { getProduct } from "@/src/lib/catalog";
+import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { validatePlan } from "@/src/lib/multi-room";
 import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -23,12 +23,27 @@ export default function ShopStep() {
   const [uid, setUid] = useState<string | null>(null);
   const plan = state.plan;
   const v = plan && geom ? validatePlan(state, plan) : null;
+  const chosen = plan ? plan.filter((it) => state.realSelections[it.uid]).length : 0;
+
+  // Name each layout position by furniture type ("Sofa", "Dining chair 2"…).
+  const slotLabels: Record<string, string> = {};
+  if (plan) {
+    const totals: Record<string, number> = {};
+    const seen: Record<string, number> = {};
+    const cats = plan.map((it) => getProduct(it.productId).category);
+    cats.forEach((c) => (totals[c] = (totals[c] ?? 0) + 1));
+    plan.forEach((it, i) => {
+      const c = cats[i];
+      seen[c] = (seen[c] ?? 0) + 1;
+      slotLabels[it.uid] = CATEGORY_MAP[c].label + (totals[c] > 1 ? ` ${seen[c]}` : "");
+    });
+  }
 
   return (
     <WizardScaffold
       step={8}
       title="Shop Your Room"
-      subtitle="Tap each layout item to choose a real product to buy, or use a layout-safe alternative with verified dimensions."
+      subtitle="Tap a piece on the plan, or a Choose button below, to pick a real product to buy for that spot."
       cta={plan ? { label: "View final plan", icon: "check", onPress: () => router.push("/plan/results"), testID: "shop-continue-button" } : undefined}
       header={v ? <BudgetBar total={v.total} budget={totalBudget(state)} /> : undefined}
     >
@@ -48,11 +63,38 @@ export default function ShopStep() {
               </Text>
             </View>
           </Card>
-          <Text style={s.h}>Selected furniture</Text>
+          <View style={s.hRow}>
+            <Text style={s.h}>Selected furniture</Text>
+            <Text style={s.count} testID="shop-chosen-count">
+              {chosen} of {plan.length} chosen
+            </Text>
+          </View>
           {plan.map((it) => {
             const p = getProduct(it.productId);
             const selected = state.realSelections[it.uid];
-            const displayPrice = selected?.price_text ?? (selected?.price !== null && selected?.price !== undefined ? money(selected.price) : money(p.price));
+            const isCustom = p.category === "custom";
+            const label = isCustom ? p.name : slotLabels[it.uid];
+            const space = `${p.width}×${p.depth} cm`;
+
+            // Nothing chosen yet: show a "choose" button for this layout position instead of
+            // the demo catalog entry (its name, retailer and price are not real products).
+            if (!selected && !isCustom) {
+              return (
+                <Pressable key={it.uid} onPress={() => setUid(it.uid)} testID={`shop-item-${it.uid}`} style={({ pressed }) => [s.item, s.itemEmpty, pressed && { opacity: 0.8 }]}>
+                  <ProductSwatch category={p.category} style={p.styles[0]} size={52} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={s.name}>{label}</Text>
+                    <Text style={s.caption}>Not chosen yet · space in layout {space}</Text>
+                  </View>
+                  <View style={s.chooseBtn}>
+                    <Feather name="shopping-bag" size={14} color={colors.onBrandPrimary} />
+                    <Text style={s.chooseLabel}>Choose</Text>
+                  </View>
+                </Pressable>
+              );
+            }
+
+            const displayPrice = selected ? selected.price_text ?? (selected.price !== null ? money(selected.price) : "See price") : money(p.price);
             return (
               <Pressable key={it.uid} onPress={() => setUid(it.uid)} testID={`shop-item-${it.uid}`} style={({ pressed }) => [s.item, selected && s.itemSelected, pressed && { opacity: 0.8 }]}>
                 {selected?.image ? (
@@ -61,15 +103,18 @@ export default function ShopStep() {
                   <ProductSwatch category={p.category} style={p.styles[0]} size={52} />
                 )}
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.name}>{selected?.title ?? p.name}</Text>
+                  {selected ? <Text style={s.slot}>{label}</Text> : null}
+                  <Text style={s.name} numberOfLines={2}>
+                    {selected?.title ?? p.name}
+                  </Text>
                   {selected ? (
                     <>
-                      <Text style={s.caption}>{selected.retailer} · Selected real product</Text>
-                      <Text style={s.proxy}>Layout proxy: {p.width}×{p.depth}×{p.height} cm</Text>
+                      <Text style={s.caption}>{selected.retailer}</Text>
+                      <Text style={s.proxy}>Space in layout: {space}</Text>
                     </>
                   ) : (
                     <Text style={s.caption}>
-                      {p.width}×{p.depth}×{p.height} cm · {p.retailer}
+                      Your own item · {p.width}×{p.depth}×{p.height} cm
                     </Text>
                   )}
                 </View>
@@ -89,6 +134,12 @@ export default function ShopStep() {
 
 const useStyles = makeStyles((c) => ({
   h: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
+  hRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: spacing.md },
+  count: { fontFamily: fonts.text, fontSize: 13, color: c.muted },
+  itemEmpty: { borderStyle: "dashed", borderColor: c.borderStrong },
+  chooseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: c.brandPrimary },
+  chooseLabel: { fontFamily: fonts.text, fontSize: 14, fontWeight: "600", color: c.onBrandPrimary },
+  slot: { fontFamily: fonts.text, fontSize: 11, color: c.muted, textTransform: "uppercase", letterSpacing: 0.8 },
   status: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginTop: spacing.sm },
   caption: { flex: 1, fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, backgroundColor: c.surfaceSecondary, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border },
