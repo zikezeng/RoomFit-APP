@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 
-import { Card, Notice, money } from "@/src/components/ui";
+import { Card, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORIES } from "@/src/lib/catalog";
 import { typicalCost } from "@/src/lib/ranking";
@@ -12,7 +12,6 @@ import { configsOf, defaultNeeds, usePlan } from "@/src/state/plan-store";
 import { CategoryId } from "@/src/lib/types";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-const MIN_TOTAL = 300;
 const MAX_TOTAL = 150000;
 const WARNING_THRESHOLD = 0.9;
 const digits = (text: string) => text.replace(/[^0-9]/g, "");
@@ -90,31 +89,9 @@ export default function BudgetStep() {
 
 function ApartmentBudget() {
   const router = useRouter();
-  const { state, update, setApartmentBudget } = usePlan();
+  const { state, update } = usePlan();
   const s = useStyles();
   const { colors } = useTheme();
-  const [draft, setDraft] = useState(String(state.apartmentBudget));
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!editing) setDraft(String(state.apartmentBudget));
-  }, [state.apartmentBudget, editing]);
-
-  const onBudgetText = (text: string) => {
-    const clean = digits(text);
-    setDraft(clean);
-    const number = Number(clean);
-    if (!clean) setError("Enter a total apartment budget.");
-    else if (!Number.isFinite(number) || number < MIN_TOTAL || number > MAX_TOTAL)
-      setError(`Enter a budget between ${money(MIN_TOTAL)} and ${money(MAX_TOTAL)}.`);
-    else setError(null);
-  };
-  const commitBudget = () => {
-    setEditing(false);
-    const n = Number(draft);
-    if (!draft || !Number.isFinite(n) || n < MIN_TOTAL || n > MAX_TOTAL) return;
-    setApartmentBudget(Math.round(n));
-  };
 
   const prefs = { styles: state.styles, moods: state.moods };
   const configs = configsOf(state);
@@ -169,36 +146,16 @@ function ApartmentBudget() {
     <WizardScaffold
       step={6}
       title="Let's Plan Your Budget"
-      subtitle="Set one budget for all rooms, then adjust furniture spending targets."
+      subtitle="Adjust furniture spending targets for each category within your apartment budget."
       keyboardAware
       cta={{
         label: "Generate layouts",
         icon: "grid",
-        disabled: !!error || !roomIds.length || !active?.items.length || active.planned <= 0,
-        onPress: () => { commitBudget(); router.push("/plan/layouts"); },
+        disabled: !roomIds.length || !active?.items.length || active.planned <= 0,
+        onPress: () => router.push("/plan/layouts"),
         testID: "budget-continue-button",
       }}
     >
-      <Card style={{ gap: spacing.md }}>
-        <Text style={s.h}>Total apartment budget</Text>
-        <Text style={s.k}>Shared across all {roomIds.length || 1} selected rooms.</Text>
-        <View style={s.totalInputRow}>
-          <Text style={s.dollar}>$</Text>
-          <TextInput
-            testID="budget-input"
-            accessibilityLabel="Total budget for all rooms in dollars"
-            value={draft}
-            keyboardType="number-pad"
-            onFocus={() => setEditing(true)}
-            onChangeText={onBudgetText}
-            onBlur={commitBudget}
-            onSubmitEditing={commitBudget}
-            style={s.totalInput}
-            placeholder="e.g. 5000"
-          />
-        </View>
-        {error ? <Notice tone="error" text={error} testID="budget-error" /> : null}
-      </Card>
       <Text style={s.h}>Furniture budget breakdown</Text>
       <Text style={s.description}>
         {roomName}: type a target for each category, or drag the slider. Targets are independent.
@@ -288,10 +245,6 @@ const useStyles = makeStyles(c => ({
   name: { fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface, flexShrink: 1 },
   description: { fontFamily: fonts.text, fontSize: 13, lineHeight: 20, color: c.muted },
   between: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md },
-  totalInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: c.border,
-    borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: c.surfaceSecondary },
-  dollar: { fontFamily: fonts.display, fontSize: 34, color: c.muted },
-  totalInput: { flex: 1, fontFamily: fonts.display, fontSize: 34, color: c.onSurface, paddingVertical: spacing.md },
   categoryCard: { gap: spacing.sm, padding: spacing.md },
   categoryInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1,
     borderColor: c.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, minWidth: 110 },
