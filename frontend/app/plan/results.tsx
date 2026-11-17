@@ -166,7 +166,7 @@ export default function ResultsStep() {
               </Text>
               {line.status === "real"
                 ? (() => {
-                    const fit = fitCheck(real!.details, { geom: geomOf(entries[i].roomId), item: entries[i].item, others: entries.filter((e) => e.roomId === entries[i].roomId).map((e) => e.item) });
+                    const fit = fitCheck(real!.details, { geom: geomOf(entries[i].roomId), item: entries[i].item, others: entries.filter((e) => e.roomId === entries[i].roomId).map((e) => e.item), realOf: (u) => realSelections[entries.findIndex((e) => e.item.uid === u && e.roomId === entries[i].roomId)]?.details });
                     return (
                       <Text style={[s.k, fit.level === "warn" && s.warn]} testID={`list-item-size-${resultItems[i].uid}`}>
                         Real size: {sizeText(real!.details)}

@@ -191,7 +191,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                 <Text style={s.specK}>Real size of this product</Text>
                 <Text style={s.specV}>{sizeText(selectedReal.details)}</Text>
                 {(() => {
-                  const fit = fitCheck(selectedReal.details, { geom, item: item!, others: roomPlan });
+                  const fit = fitCheck(selectedReal.details, { geom, item: item!, others: roomPlan, realOf: (u) => state.realSelections[u]?.details });
                   return <Text style={[s.caption, { color: fit.level === "ok" ? colors.success : fit.level === "warn" ? colors.error : colors.muted }]} testID="product-sheet-fit">{fit.text}{fit.note ? ` ${fit.note}` : ""}</Text>;
                 })()}
               </View>

@@ -150,7 +150,7 @@ export default function ShopStep() {
                       <Text style={s.caption}>{selected.retailer}</Text>
                       <Text style={s.proxy}>Real size: {sizeText(selected.details)}</Text>
                       {(() => {
-                        const fit = fitCheck(selected.details, { geom, item: it, others: plan });
+                        const fit = fitCheck(selected.details, { geom, item: it, others: plan, realOf: (u) => state.realSelections[u]?.details });
                         return (
                           <Text style={[s.proxy, fit.level === "warn" && { color: colors.error }, fit.level === "ok" && { color: colors.success }]} testID={`shop-item-fit-${it.uid}`}>
                             {fit.level === "unknown" ? `Planned spot: ${space}` : fit.text}

@@ -4,7 +4,7 @@
 import { pointInPoly, RoomGeom } from "./apartment";
 import { CATEGORY_MAP, getProduct } from "./catalog";
 import { footprint, rectsOverlap } from "./solver";
-import { CategoryId, PlacedItem, Pt, RealProductDetails, RealProductSelection, Rect } from "./types";
+import { CategoryId, PlacedItem, Product, Pt, RealProductDetails, RealProductSelection, Rect } from "./types";
 
 const r = (n: number) => Math.round(n);
 
@@ -24,9 +24,11 @@ export function sizeText(d?: RealProductDetails | null): string {
 export interface FitResult {
   level: "ok" | "warn" | "unknown";
   text: string;
-  /** Where the piece ends up when it had to slide along its wall (room cm). Same as the layout spot when no move was needed. */
+  /** Where the piece ends up (room cm). Same as the layout spot when no move was needed. */
   at?: { cx: number; cy: number };
-  /** Non-blocking hint, e.g. a neighbouring piece that would need to move a little. */
+  /** Neighbouring pieces that were moved automatically to make room (uid → new centre). */
+  moves?: Record<string, { cx: number; cy: number }>;
+  /** Shown only when a neighbour could NOT be moved out of the way. */
   note?: string;
 }
 
@@ -34,12 +36,15 @@ export interface FitResult {
 export interface FitContext {
   geom: RoomGeom | null;
   item: PlacedItem;
-  /** Layout item of the room, used only to say which neighbours would need to move. */
+  /** All layout items of the room (this one may be included; it is skipped). */
   others: PlacedItem[];
+  /** Real details of the other pieces, so neighbours are packed at their real width when known. */
+  realOf?: (uid: string) => RealProductDetails | undefined;
 }
 
-// Rugs lie flat and mattresses sit in the bed frame: a door can swing over them.
+// Rugs lie flat and mattresses sit in the bed frame: a door can swing over them and they don't block anything.
 const FLAT = new Set<CategoryId>(["rug", "mattress"]);
+const GAP = 2; // cm between pieces packed along a wall
 
 function insideRoom(rc: Rect, poly: Pt[]) {
   const e = 0.5;
@@ -50,13 +55,24 @@ function insideRoom(rc: Rect, poly: Pt[]) {
   return pts.every((p) => pointInPoly(p, poly));
 }
 
+const nameOf = (p: Product) => (p.category === "custom" ? p.name : CATEGORY_MAP[p.category].label.toLowerCase());
+
+/** Size used for a piece: its real width/depth when known, else the planned size. */
+function sized(p: Product, d?: RealProductDetails) {
+  if (!d || d.status !== "ok") return p;
+  return { ...p, width: d.width ?? p.width, depth: d.depth ?? p.depth };
+}
+
 /**
  * Can the real product go in this room at (or near) its spot? The rule is deliberately simple:
- *   1. it must not be longer than the wall it stands against, and must stay inside the room;
+ *   1. it must stay inside the room and not be longer than the wall it stands against;
  *   2. it must not block a door.
- * The planned spot from the layout is only a starting point, not a size limit. If the product is wider
- * than the spot, we slide it along its wall (or nudge a free-standing piece) to the nearest place that
- * satisfies both rules. Touching a neighbouring piece is reported as a note, not as a failure.
+ * The planned spot from the layout is only a starting point, not a size limit.
+ * Neighbours are rearranged automatically when that is possible:
+ *   - pieces on the same wall keep their order and are pushed apart (they fit if their total length
+ *     fits the wall and none of them ends up in front of a door);
+ *   - free-standing pieces it overlaps are nudged to the nearest free spot.
+ * Only a neighbour that cannot be moved is mentioned (as a hint, not a failure).
  * When the depth is unknown we use the layout's depth and say so.
  */
 export function fitCheck(d: RealProductDetails | null | undefined, ctx: FitContext): FitResult {
@@ -71,9 +87,11 @@ export function fitCheck(d: RealProductDetails | null | undefined, ctx: FitConte
   const D = d.depth ?? proxy.depth;
   const guessNote = d.depth === null ? " (depth unknown — checked with the planned depth)" : "";
   const real = { ...proxy, width: W, depth: D };
-  const rectAt = (cx: number, cy: number) => footprint({ ...item, cx, cy }, real, g);
-  const blocksDoor = (rc: Rect) => !FLAT.has(proxy.category) && g.doors.some((dr) => rectsOverlap(rc, dr.zone));
+  const blocksDoor = (rc: Rect, p: Product) => !FLAT.has(p.category) && g.doors.some((dr) => rectsOverlap(rc, dr.zone));
+  const okRect = (rc: Rect, p: Product) => insideRoom(rc, g.poly) && !blocksDoor(rc, p);
   const ws = item.wall !== null ? g.walls[item.wall] : undefined;
+  const along = (it: { cx: number; cy: number }) => (ws?.axis === "h" ? it.cx : it.cy);
+  const setAlong = (it: PlacedItem, t: number): PlacedItem => (ws?.axis === "h" ? { ...it, cx: t } : { ...it, cy: t });
 
   // Rule 1a: not longer than its wall; not deeper than the room is across.
   if (ws) {
@@ -83,39 +101,123 @@ export function fitCheck(d: RealProductDetails | null | undefined, ctx: FitConte
     if (D > across - 1) return { level: "warn", text: `${r(D)} cm deep — deeper than the room is across (${r(across)} cm).${guessNote}` };
   }
 
-  // Candidate spots: along the wall in 5 cm steps, or small nudges for a free-standing piece. Nearest first.
-  const cands: { cx: number; cy: number; dist: number }[] = [];
+  // Candidate spots for this piece: along its wall in 5 cm steps, or small nudges if free-standing. Nearest first.
+  const cands: { it: PlacedItem; dist: number }[] = [];
   if (ws) {
-    const t0 = ws.axis === "h" ? item.cx : item.cy;
-    for (let t = ws.s0 + W / 2; t <= ws.s1 - W / 2 + 0.01; t += 5) cands.push({ cx: ws.axis === "h" ? t : item.cx, cy: ws.axis === "h" ? item.cy : t, dist: Math.abs(t - t0) });
-    // Keep the exact planned centre as an option when it is valid.
-    if (t0 - W / 2 >= ws.s0 - 0.5 && t0 + W / 2 <= ws.s1 + 0.5) cands.push({ cx: item.cx, cy: item.cy, dist: 0 });
+    const t0 = along(item);
+    for (let t = ws.s0 + W / 2; t <= ws.s1 - W / 2 + 0.01; t += 5) cands.push({ it: setAlong(item, t), dist: Math.abs(t - t0) });
+    if (t0 - W / 2 >= ws.s0 - 0.5 && t0 + W / 2 <= ws.s1 + 0.5) cands.push({ it: item, dist: 0 });
   } else {
-    for (let dx = -60; dx <= 60; dx += 10) for (let dy = -60; dy <= 60; dy += 10) cands.push({ cx: item.cx + dx, cy: item.cy + dy, dist: Math.hypot(dx, dy) });
+    for (let dx = -60; dx <= 60; dx += 10) for (let dy = -60; dy <= 60; dy += 10) cands.push({ it: { ...item, cx: item.cx + dx, cy: item.cy + dy }, dist: Math.hypot(dx, dy) });
   }
   cands.sort((a, b) => a.dist - b.dist);
-  const inRoom = cands.filter((c) => insideRoom(rectAt(c.cx, c.cy), g.poly));
-  if (!inRoom.length) return { level: "warn", text: ws ? `Doesn't fit along this wall.${guessNote}` : `Too big for the open floor in this room.${guessNote}` };
-  const best = inRoom.find((c) => !blocksDoor(rectAt(c.cx, c.cy)));
-  if (!best) return { level: "warn", text: `Would block the door wherever it goes on this ${ws ? "wall" : "spot"}.${guessNote}` };
+  const valid = cands.filter((c) => okRect(footprint(c.it, real, g), real));
+  if (!valid.length) {
+    const anyInside = cands.some((c) => insideRoom(footprint(c.it, real, g), g.poly));
+    if (!anyInside) return { level: "warn", text: ws ? `Doesn't fit along this wall.${guessNote}` : `Too big for the open floor in this room.${guessNote}` };
+    return { level: "warn", text: `Would block the door wherever it goes on this ${ws ? "wall" : "spot"}.${guessNote}` };
+  }
 
-  // Neighbours it would touch (only a hint: those can usually be moved).
-  const rc = rectAt(best.cx, best.cy);
-  const touching = FLAT.has(proxy.category)
-    ? []
-    : ctx.others
-        .filter((o) => o.uid !== item.uid)
-        .map((o) => ({ o, p: getProduct(o.productId) }))
-        .filter(({ o, p }) => !FLAT.has(p.category) && rectsOverlap(rc, footprint(o, p, g)))
-        .map(({ p }) => (p.category === "custom" ? p.name : CATEGORY_MAP[p.category].label.toLowerCase()));
-  const counts = touching.reduce<Record<string, number>>((m, n) => ((m[n] = (m[n] ?? 0) + 1), m), {});
-  const uniq = Object.entries(counts).map(([n, c]) => (c > 1 ? `${c} ${n}s` : n));
-  const moved = best.dist > 4 ? ` Slide it about ${r(best.dist)} cm along the ${ws ? "wall" : "floor"} from the planned spot.` : "";
+  // Neighbours, at their real size when known.
+  const nb = ctx.others
+    .filter((o) => o.uid !== item.uid)
+    .map((o) => ({ o, p: sized(getProduct(o.productId), ctx.realOf?.(o.uid)) }))
+    .filter(({ p }) => !FLAT.has(p.category));
+  const sameWall = ws ? nb.filter(({ o }) => o.wall === item.wall) : [];
+  const rest = nb.filter((n) => !sameWall.includes(n));
+
+  /** Push the pieces on this wall apart, keeping their order, around the main piece at `me`. */
+  const packWall = (me: PlacedItem): Map<string, PlacedItem> | null => {
+    if (!ws) return new Map();
+    const moved = new Map<string, PlacedItem>();
+    const tMe = along(me);
+    const left = sameWall.filter((n) => along(n.o) < along(item)).sort((a, b) => along(b.o) - along(a.o));
+    const right = sameWall.filter((n) => along(n.o) >= along(item)).sort((a, b) => along(a.o) - along(b.o));
+    let edge = tMe - W / 2;
+    for (const n of left) {
+      const t = Math.min(along(n.o), edge - GAP - n.p.width / 2);
+      if (t - n.p.width / 2 < ws.s0 - 0.5) return null;
+      moved.set(n.o.uid, setAlong(n.o, t));
+      edge = t - n.p.width / 2;
+    }
+    edge = tMe + W / 2;
+    for (const n of right) {
+      const t = Math.max(along(n.o), edge + GAP + n.p.width / 2);
+      if (t + n.p.width / 2 > ws.s1 + 0.5) return null;
+      moved.set(n.o.uid, setAlong(n.o, t));
+      edge = t + n.p.width / 2;
+    }
+    for (const n of sameWall) if (!okRect(footprint(moved.get(n.o.uid)!, n.p, g), n.p)) return null;
+    return moved;
+  };
+
+  // Take the nearest spot where the whole wall can be rearranged; otherwise the nearest spot on its own.
+  let best = valid[0];
+  let wallMoves = packWall(best.it);
+  if (!wallMoves) {
+    for (const c of valid) {
+      const m = packWall(c.it);
+      if (m) {
+        best = c;
+        wallMoves = m;
+        break;
+      }
+    }
+  }
+  const mainRect = footprint(best.it, real, g);
+
+  // Where every other piece is now (moved wall pieces included).
+  const placedRects = new Map<string, Rect>();
+  for (const n of nb) placedRects.set(n.o.uid, footprint(wallMoves?.get(n.o.uid) ?? n.o, n.p, g));
+  const blocked: string[] = [];
+  if (!wallMoves) for (const n of sameWall) if (rectsOverlap(mainRect, placedRects.get(n.o.uid)!)) blocked.push(nameOf(n.p));
+
+  // Free-standing (or other-wall) pieces it now overlaps: nudge each to the nearest free spot.
+  const freeMoves = new Map<string, PlacedItem>();
+  for (const n of rest) {
+    const rc = placedRects.get(n.o.uid)!;
+    if (!rectsOverlap(mainRect, rc)) continue;
+    const clear = (cand: PlacedItem) => {
+      const cr = footprint(cand, n.p, g);
+      if (!okRect(cr, n.p) || rectsOverlap(cr, mainRect)) return false;
+      for (const [uid, other] of placedRects) if (uid !== n.o.uid && rectsOverlap(cr, other)) return false;
+      return !g.obstacles.some((ob) => rectsOverlap(cr, ob.rect));
+    };
+    let found: PlacedItem | null = null;
+    const steps: { dx: number; dy: number; dist: number }[] = [];
+    for (let dx = -100; dx <= 100; dx += 10) for (let dy = -100; dy <= 100; dy += 10) steps.push({ dx, dy, dist: Math.hypot(dx, dy) });
+    steps.sort((a, b) => a.dist - b.dist);
+    for (const s of steps) {
+      const w2 = n.o.wall !== null ? g.walls[n.o.wall] : undefined;
+      // A piece that stands against a wall only slides along that wall.
+      if (w2 && (w2.axis === "h" ? s.dy !== 0 : s.dx !== 0)) continue;
+      const cand = { ...n.o, cx: n.o.cx + s.dx, cy: n.o.cy + s.dy };
+      if (clear(cand)) {
+        found = cand;
+        break;
+      }
+    }
+    if (found) {
+      freeMoves.set(n.o.uid, found);
+      placedRects.set(n.o.uid, footprint(found, n.p, g));
+    } else blocked.push(nameOf(n.p));
+  }
+
+  const moves: Record<string, { cx: number; cy: number }> = {};
+  for (const [uid, it] of [...(wallMoves ?? new Map()), ...freeMoves]) {
+    const o = ctx.others.find((x) => x.uid === uid)!;
+    if (Math.abs(it.cx - o.cx) > 0.5 || Math.abs(it.cy - o.cy) > 0.5) moves[uid] = { cx: it.cx, cy: it.cy };
+  }
+  const counts = blocked.reduce<Record<string, number>>((m, n) => ((m[n] = (m[n] ?? 0) + 1), m), {});
+  const names = Object.entries(counts).map(([n, c]) => (c > 1 ? `${c} ${n}s` : n));
   return {
     level: "ok",
-    text: `Fits: inside the room and clear of the door.${moved}${guessNote}`,
-    at: { cx: best.cx, cy: best.cy },
-    note: uniq.length ? `It would touch the ${uniq.length > 1 ? `${uniq.slice(0, -1).join(", ")} and ${uniq[uniq.length - 1]}` : uniq[0]} — move ${touching.length > 1 ? "them" : "it"} a little.` : undefined,
+    text: `Fits: inside the room and clear of the door.${guessNote}`,
+    at: { cx: best.it.cx, cy: best.it.cy },
+    moves,
+    note: names.length
+      ? `It would touch the ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]} and there is no room to move ${blocked.length > 1 ? "them" : "it"} — consider a smaller piece.`
+      : undefined,
   };
 }
 

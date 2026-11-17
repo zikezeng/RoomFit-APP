@@ -96,7 +96,20 @@ function itemsOfRoom(state: PlanState, roomId: string, colors: Scene3DColors, pl
   const totals: Record<string, number> = {};
   const seen: Record<string, number> = {};
   plan.forEach((it) => (totals[it.category] = (totals[it.category] ?? 0) + 1));
-  return plan.map((it) => {
+  // Run the fit check for every chosen product first: it may slide the piece and move neighbours out
+  // of the way. Those moves are applied below so the 3D room shows the rearranged result.
+  const realOf = (u: string) => real[u]?.details;
+  const fits: Record<string, ReturnType<typeof fitCheck>> = {};
+  const moved: Record<string, { cx: number; cy: number }> = {};
+  for (const it of plan) {
+    const sel = real[it.uid];
+    if (!sel) continue;
+    const f = fitCheck(sel.details, { geom, item: it, others: plan, realOf });
+    fits[it.uid] = f;
+    Object.assign(moved, f.moves ?? {});
+  }
+  return plan.map((planned) => {
+    const it = moved[planned.uid] ? { ...planned, ...moved[planned.uid] } : planned;
     const p = getProduct(it.productId);
     const r = footprint(it, p, geom);
     const c = place({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
@@ -113,7 +126,7 @@ function itemsOfRoom(state: PlanState, roomId: string, colors: Scene3DColors, pl
       const dt = sel.details;
       const out: Scene3DItem = { ...base, ...shapeHints(p.category, sel.title), status: "real", title: sel.title, image: sel.image, priceText, retailer: sel.retailer, url: sel.url };
       out.color = productColor(sel) ?? base.color;
-      const fit = fitCheck(dt, { geom, item: it, others: plan });
+      const fit = fits[it.uid] ?? fitCheck(dt, { geom, item: it, others: plan, realOf });
       out.sizeText = sizeText(dt);
       out.fit = fit.level;
       out.fitText = fit.text;
