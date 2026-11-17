@@ -92,7 +92,7 @@ export default function ShopStep() {
       ) : (
         <>
           <Card>
-            <ConfiguredPlan items={plan} selectedUid={uid} onPressItem={setUid} testID="shop-floorplan-svg" />
+            <ConfiguredPlan items={plan} showFurnitureEmoji showDims={false} selectedUid={uid} onPressItem={setUid} testID="shop-floorplan-svg" />
             <View style={s.status}>
               <Feather name={allOk ? "check-circle" : "alert-circle"} size={14} color={allOk ? colors.success : colors.error} />
               <Text style={s.caption} testID="shop-validity">

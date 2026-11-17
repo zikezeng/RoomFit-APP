@@ -96,12 +96,13 @@ interface Props {
   onMoveItem?: (uid: string, cx: number, cy: number) => void;
   onDragStateChange?: (active: boolean) => void;
   editable?: boolean;
+  showFurnitureEmoji?: boolean;
   showDims?: boolean;
   testID?: string;
 }
 
 /** Scaled top-down plan of ONE room (real polygon geometry, cm). */
-export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, onDragStateChange, editable = false, showDims = true, testID }: Props) {
+export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMoveItem, onDragStateChange, editable = false, showFurnitureEmoji = editable, showDims = true, testID }: Props) {
   const { colors } = useTheme();
   const [pixelWidth, setPixelWidth] = useState(0);
   const [preview, setPreview] = useState<{ uid: string; cx: number; cy: number } | null>(null);
@@ -162,7 +163,7 @@ export function FloorPlan({ geom: g, items = [], selectedUid, onPressItem, onMov
               ) : (
                 <Rect x={r.x} y={r.y} width={r.w} height={r.h} rx={soft ? 2 : Math.min(r.w, r.h) / 8} fill={catFill(colors, it.category)} opacity={it.category === "rug" ? 0.7 : 1} stroke={sel ? colors.brandPrimary : colors.onSurfaceTertiary} strokeWidth={sel ? wallW * 0.8 : wallW / 4} strokeDasharray={soft && !sel ? `${fs / 2} ${fs / 3}` : undefined} />
               )}
-              {editable ? (
+              {showFurnitureEmoji ? (
                 <SvgText x={r.x + r.w / 2} y={r.y + r.h / 2 + fs * 0.26} fontSize={Math.min(fs * 1.5, Math.min(r.w, r.h) * 0.7)} fill={colors.onSurface} textAnchor="middle">{icon}</SvgText>
               ) : !soft && name ? (
                 <>
