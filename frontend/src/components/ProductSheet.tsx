@@ -76,11 +76,10 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     const r = swap(item.uid, pid);
     if (!r) return;
     if (r.valid) {
-      const d = np.price - p.price;
-      setMsg({ tone: "success", text: `Swapped to ${np.name}. Layout re-checked: all constraints pass. Total ${d <= 0 ? "decreased" : "increased"} by ${money(Math.abs(d))}.` });
+      setMsg({ tone: "success", text: `This spot is now ${np.width}×${np.depth}×${np.height} cm. Layout re-checked: everything still fits. Choose a real product for the new size.` });
     } else {
       const fails = r.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ");
-      setMsg({ tone: "error", text: `${np.name} can't replace this piece: ${fails} Choose one of the options marked "Fits".` });
+      setMsg({ tone: "error", text: `A ${np.width}×${np.depth} cm piece can't go here: ${fails} Choose one of the sizes marked "Fits".` });
     }
   };
 
@@ -228,25 +227,26 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
             </View>
 
             {msg ? <Notice tone={msg.tone} text={msg.text} testID="swap-result-message" /> : null}
-            <Text style={s.section}>Layout-safe alternatives</Text>
-            <Text style={s.caption}>Products with verified dimensions that can safely replace the current item. Each swap is re-checked against your room, door clearance, walkways and budget.</Text>
-            {alts.map((a) => (
+            <Text style={s.section}>Other sizes for this spot</Text>
+            <Text style={s.caption}>Need a bigger or smaller piece here? Pick another size and the layout is re-checked against your room, door clearance and walkways. Changing the size clears the product chosen for this spot.</Text>
+            {alts
+              .filter((a, i) => {
+                const size = (x: typeof a.product) => `${x.width}x${x.depth}x${x.height}`;
+                return size(a.product) !== size(p) && alts.findIndex((b) => size(b.product) === size(a.product)) === i;
+              })
+              .map((a) => (
               <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
                 <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.altName}>{a.product.name}</Text>
-                  <Text style={s.caption}>
-                    {a.product.width}×{a.product.depth}×{a.product.height} cm · {STYLE_LABEL[a.product.styles[0]]}
+                  <Text style={s.altName}>
+                    {a.product.width}×{a.product.depth}×{a.product.height} cm
                   </Text>
-                  <Text style={[s.caption, { color: a.delta <= 0 ? colors.success : colors.warning, fontWeight: "600" }]}>
-                    {money(a.product.price)} ({a.delta <= 0 ? "−" : "+"}
-                    {money(Math.abs(a.delta))})
-                  </Text>
+                  <Text style={s.caption}>{STYLE_LABEL[a.product.styles[0]]} look</Text>
                   <Text style={[s.caption, { color: a.ok ? colors.success : colors.error }]} numberOfLines={2}>
                     {a.ok ? "Fits — all checks pass" : a.reason}
                   </Text>
                 </View>
-                <Button small kind={a.ok ? "primary" : "secondary"} label="Swap" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
+                <Button small kind={a.ok ? "primary" : "secondary"} label="Use size" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
               </View>
             ))}
           </ScrollView>

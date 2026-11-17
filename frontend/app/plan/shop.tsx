@@ -12,6 +12,7 @@ import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { validatePlan } from "@/src/lib/multi-room";
+import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { totalBudget, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -29,36 +30,11 @@ export default function ShopStep() {
   //  - a chosen real product counts at its real price;
   //  - the user's own custom items count at the price they entered;
   //  - positions with nothing chosen yet count as $0 (their demo price is only a planning estimate).
-  let chosen = 0;
-  let unpriced = 0;
-  let spent = 0;
-  let toChoose = 0;
-  (plan ?? []).forEach((it) => {
-    const real = state.realSelections[it.uid];
-    const p = getProduct(it.productId);
-    if (real) {
-      chosen += 1;
-      if (real.price !== null && real.price !== undefined) spent += real.price;
-      else unpriced += 1;
-    } else if (p.category === "custom") {
-      spent += p.price;
-    } else {
-      toChoose += 1;
-    }
-  });
-  spent = Math.round(spent * 100) / 100;
+  const totals = shoppingTotals((plan ?? []).map((item) => ({ item, real: state.realSelections[item.uid] })));
+  const { spent, chosen } = totals;
   const remaining = budget - spent;
   const overBudget = remaining < 0;
-  const budgetNote = [
-    toChoose > 0
-      ? overBudget
-        ? `${toChoose} ${toChoose === 1 ? "piece" : "pieces"} still to choose`
-        : `${toChoose} ${toChoose === 1 ? "piece" : "pieces"} still to choose · about ${money(Math.floor(remaining / toChoose))} each`
-      : "All pieces chosen",
-    unpriced > 0 ? `${unpriced} chosen without a listed price (not counted)` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const note = budgetNote(totals, budget, money);
 
   // Room checks (fit, overlaps, door, walkways) still come from the layout; the budget check uses real prices.
   const roomFails = v ? v.checks.filter((c) => !c.ok && !c.id.endsWith(":budget")) : [];
@@ -92,7 +68,7 @@ export default function ShopStep() {
           <View style={{ gap: 4 }}>
             <BudgetBar total={spent} budget={budget} />
             <Text style={s.budgetNote} testID="shop-budget-note">
-              {budgetNote}
+              {note}
             </Text>
           </View>
         ) : undefined

@@ -12,6 +12,7 @@ import { Button, Card, Notice, money } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { CATEGORY_MAP, getProduct } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
+import { budgetNote, shoppingTotals } from "@/src/lib/shopping-totals";
 import { validateLayout } from "@/src/lib/solver";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing } from "@/src/theme";
@@ -40,25 +41,47 @@ export default function ResultsStep() {
   const realSelections = entries.map(e =>
     (e.roomId === state.selectedRoomId ? state.realSelections : state.roomProgress[e.roomId]?.realSelections ?? {})[e.item.uid],
   );
-  const total = products.reduce((sum, p, i) => sum + (realSelections[i]?.price ?? p.price), 0);
+  // Same money rules as Step 8: real choices and the user's own items count; unchosen positions count as $0.
+  const totals = shoppingTotals(entries.map((e, i) => ({ item: e.item, real: realSelections[i] })));
+  const total = totals.spent;
+  const lines = totals.lines;
+  const nameOf = (i: number) => (lines[i].status === "real" ? realSelections[i]!.title : lines[i].status === "custom" ? products[i].name : `${CATEGORY_MAP[products[i].category].label} — not chosen yet`);
+  const priceOf = (i: number) => {
+    const real = realSelections[i];
+    const line = lines[i];
+    if (line.status === "unchosen") return "—";
+    if (line.price === null) return "See price";
+    return real?.price_text ?? money(line.price);
+  };
   const budget = resultRooms.reduce((sum, id) => sum + (id === state.selectedRoomId ? state.budget : state.roomProgress[id]?.budget ?? 0), 0);
+  const remaining = budget - total;
+  const note = budgetNote(totals, budget, money);
+  // Room checks come from the layout; the budget check uses the real prices above.
+  const roomFails = v ? v.checks.filter((c) => !c.ok && c.id !== "budget") : [];
+  const allOk = roomFails.length === 0 && remaining >= 0;
+  const validityText = allOk
+    ? `Validated placement: inside walls, no overlaps, door clear, walkways clear. ${money(total)} of ${money(budget)} used.`
+    : [...roomFails.map((c) => c.detail), remaining < 0 ? `Over budget by ${money(-remaining)}.` : null].filter(Boolean).join(" ");
 
   const csv = () => {
     const esc = (x: string | number) => `"${String(x).replace(/"/g, '""')}"`;
-    const rows = [["Room", "Category", "Name", "Price (USD)", "Retailer", "Link", "Layout proxy size"]];
+    const rows = [["Room", "Category", "Name", "Price (USD)", "Retailer", "Link", "Space in layout"]];
     products.forEach((p, i) => {
       const real = realSelections[i];
+      const line = lines[i];
       rows.push([
         entries[i].room,
         CATEGORY_MAP[p.category].label,
-        real?.title ?? p.name,
-        String(real?.price ?? p.price),
-        real?.retailer ?? p.retailer,
-        real?.url ?? p.url ?? "Not verified (demo)",
+        nameOf(i),
+        line.price === null ? "" : String(line.price),
+        line.status === "real" ? real!.retailer : line.status === "custom" ? "Your own item" : "",
+        real?.url ?? "",
         `${p.width}×${p.depth}×${p.height} cm`,
       ]);
     });
-    rows.push(["", "", "TOTAL", "", "", "", String(total), "", ""], ["", "", "BUDGET", "", "", "", String(budget), "", ""]);
+    rows.push(["", "", "TOTAL (chosen items)", String(total), "", "", ""], ["", "", "BUDGET", String(budget), "", "", ""], ["", "", "REMAINING", String(Math.round((budget - total) * 100) / 100), "", "", ""]);
+    if (totals.toChoose) rows.push(["", "", `${totals.toChoose} not chosen yet (not in total)`, "", "", "", ""]);
+    if (totals.unpriced) rows.push(["", "", `${totals.unpriced} chosen without a listed price (not in total)`, "", "", "", ""]);
     return rows.map((r) => r.map(esc).join(",")).join("\n");
   };
   const download = async () => {
@@ -76,10 +99,7 @@ export default function ResultsStep() {
   };
   const print = async () => {
     if (Platform.OS === "web") window.print();
-    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((p, i) => {
-      const real = realSelections[i];
-      return `• ${real?.title ?? p.name} — ${money(real?.price ?? p.price)}`;
-    }).join("\n") + `\nTotal ${money(total)} of ${money(budget)}` });
+    else await Share.share({ message: `My RoomFit plan (${geom?.label})\n` + products.map((_, i) => `• ${nameOf(i)} — ${priceOf(i)}`).join("\n") + `\nChosen so far ${money(total)} of ${money(budget)}${note ? `\n${note}` : ""}` });
   };
 
   if (!plan || !v || !geom) {
@@ -95,15 +115,15 @@ export default function ResultsStep() {
     <WizardScaffold step={9} title="Your RoomFit Plan Is Ready!" subtitle={`${geom.label} · ${fmtLen(geom.width, geom.unit)} × ${fmtLen(geom.length, geom.unit)} · ${fmtAreaCm2(geom.area, geom.unit)}`} cta={hasNext ? { label: "Next Room", testID: "next-room-button", onPress: () => { nextRoom(); setUid(null); setMsg(null); router.push("/plan/furniture"); } } : undefined}>
       <Card style={{ gap: spacing.sm }}>
         {state.selectedRoomIds.length > 1 ? <CombinedPlan onPressItem={setUid} /> : <FloorPlan geom={geom} items={plan} selectedUid={uid} onPressItem={setUid} testID="results-floorplan-svg" />}
-        <Notice tone={v.valid ? "success" : "error"} text={v.valid ? "Validated placement: inside walls, no overlaps, door clear, walkways clear, within budget." : v.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")} testID="results-validity" />
+        <Notice tone={allOk ? "success" : "error"} text={validityText} testID="results-validity" />
       </Card>
       <Card style={{ gap: spacing.md }} testID="budget-summary">
         <Text style={s.h}>Budget summary</Text>
         <View style={s.stats}>
           {[
             ["Budget", budget, "summary-budget"],
-            ["Furniture", total, "summary-total"],
-            ["Remaining", budget - total, "summary-remaining"],
+            ["Chosen so far", total, "summary-total"],
+            [remaining >= 0 ? "Remaining" : "Over budget", Math.abs(remaining), "summary-remaining"],
           ].map(([k, n, id]) => (
             <View key={k as string} style={s.stat}>
               <Text style={s.k}>{k}</Text>
@@ -114,10 +134,16 @@ export default function ResultsStep() {
           ))}
         </View>
         <BudgetBar total={total} budget={budget} />
+        <Text style={s.k} testID="summary-note">
+          {note}
+        </Text>
       </Card>
       <Text style={s.h}>Shopping list</Text>
       {products.map((p, i) => {
         const real = realSelections[i];
+        const line = lines[i];
+        const inCurrentRoom = entries[i].roomId === state.selectedRoomId;
+        const space = `${p.width}×${p.depth} cm`;
         return (
           <Card key={`${entries[i].room}-${resultItems[i].uid}`} style={s.item} testID={`list-item-${resultItems[i].uid}`}>
             {real?.image ? (
@@ -126,16 +152,22 @@ export default function ResultsStep() {
               <ProductSwatch category={p.category} style={p.styles[0]} size={56} />
             )}
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={s.name}>{real?.title ?? p.name}</Text>
-              <Text style={s.k}>
-                {real ? `${real.retailer} · Selected real product` : `${p.width}×${p.depth}×${p.height} cm · ${p.retailer}`}
+              <Text style={s.name} numberOfLines={2}>
+                {line.status === "real" ? real!.title : line.status === "custom" ? p.name : CATEGORY_MAP[p.category].label}
               </Text>
-              {real ? <Text style={s.k}>Layout proxy: {p.width}×{p.depth}×{p.height} cm</Text> : null}
+              <Text style={s.k}>
+                {line.status === "real" ? real!.retailer : line.status === "custom" ? `Your own item · ${p.width}×${p.depth}×${p.height} cm` : "Not chosen yet · not in total"}
+              </Text>
+              {line.status !== "custom" ? <Text style={s.k}>Space in layout: {space}</Text> : null}
             </View>
             <View style={s.priceBlock}>
-              <Text style={s.price}>{money(real?.price ?? p.price)}</Text>
+              <Text style={s.price} testID={`list-item-price-${resultItems[i].uid}`}>
+                {priceOf(i)}
+              </Text>
               {real?.url ? (
                 <Button small kind="ghost" label="View product" icon="external-link" onPress={() => Linking.openURL(real.url)} testID={`result-product-link-${i}`} />
+              ) : line.status === "unchosen" && inCurrentRoom ? (
+                <Button small kind="secondary" label="Choose" icon="shopping-bag" onPress={() => setUid(resultItems[i].uid)} testID={`result-choose-${resultItems[i].uid}`} />
               ) : null}
             </View>
           </Card>
