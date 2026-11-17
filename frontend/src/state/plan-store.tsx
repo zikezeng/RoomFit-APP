@@ -245,6 +245,7 @@ interface Ctx {
   update: (patch: Partial<PlanState>, invalidate?: Invalidate) => void;
   setApartmentBudget: (amount: number) => void;
   setRoomBudgets: (changes: Record<string, number>) => void;
+  setBudgetPlan: (total: number, changes: Record<string, number>) => void;
   setApartment: (fn: (a: Apartment) => Apartment) => void;
   selectRoom: (id: string) => void;
   startRooms: () => void;
@@ -342,6 +343,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }, [setState]);
 
+  // Save total and room allocations together, avoiding stale-budget navigation.
+  const setBudgetPlan = useCallback((total: number, changes: Record<string, number>) => {
+    setState(s => {
+      if (!Number.isFinite(total) || total < 300 || total > 150000) return s;
+      const automatic = rebalanceRoomBudgets({ ...s, roomBudgetOverrides: null });
+      const manual = s.roomBudgetOverrides == null && !Object.keys(changes).length
+        ? null
+        : Object.fromEntries(s.selectedRoomIds.map(id => [
+          id, s.roomBudgetOverrides?.[id] ?? automatic.roomProgress[id]?.budget ?? 0,
+        ])) as Record<string, number>;
+      if (manual) {
+        for (const [id, amount] of Object.entries(changes)) {
+          if (!s.selectedRoomIds.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
+          manual[id] = Math.round(amount);
+        }
+        if (Object.values(manual).reduce((sum, n) => sum + n, 0) > total) return s;
+      }
+      return rebalanceRoomBudgets({
+        ...s, apartmentBudget: Math.round(total), roomBudgetOverrides: manual, realSelections: {},
+      });
+    });
+  }, [setState]);
+
   /** Any change to the apartment geometry invalidates layouts and the furnished plan. */
   const setApartment = useCallback((fn: (a: Apartment) => Apartment) => {
     setState((s) => {
@@ -405,8 +429,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const loadDemo = useCallback(() => setState(demoState()), [setState]);
 
   const value = useMemo(
-    () => ({ state, ready, geom, update, setApartmentBudget, setRoomBudgets, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
-    [state, ready, geom, update, setApartmentBudget, setRoomBudgets, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
+    () => ({ state, ready, geom, update, setApartmentBudget, setRoomBudgets, setBudgetPlan, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo }),
+    [state, ready, geom, update, setApartmentBudget, setRoomBudgets, setBudgetPlan, setApartment, selectRoom, startRooms, nextRoom, previousRoom, generate, selectLayout, swap, selectRealProduct, clearRealProduct, reset, loadDemo],
   );
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
