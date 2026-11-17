@@ -11,6 +11,7 @@ import { alternativesFor } from "@/src/lib/solver";
 import { buildGeom } from "@/src/lib/apartment";
 import { fitCheck, sizeText } from "@/src/lib/product-fit";
 import { LOADING_DETAILS, NO_DETAILS, RealShoppingProduct, fetchProductDetails, searchRealProducts } from "@/src/lib/real-products";
+import { RealProductSelection } from "@/src/lib/types";
 import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -30,6 +31,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const p = item ? getProduct(item.productId) : null;
   const selectedReal = uid ? state.realSelections[uid] : undefined;
   const latest = useRef(state);
+  const inFlight = useRef(new Set<string>());
   useEffect(() => {
     latest.current = state;
   });
@@ -88,21 +90,36 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     }
   };
 
+  // Look a selected product up once more for its real size and colour. If that fails it stays "size unknown".
+  const lookUp = (target: string, picked: RealProductSelection) => {
+    if (!picked.page_token || inFlight.current.has(target)) return;
+    inFlight.current.add(target);
+    const stillChosen = () => {
+      const cur = latest.current.realSelections[target];
+      return !!cur && cur.id === picked.id && cur.url === picked.url;
+    };
+    fetchProductDetails(picked.page_token)
+      .then((details) => stillChosen() && selectRealProduct(target, { ...picked, details }))
+      .catch(() => stillChosen() && selectRealProduct(target, { ...picked, details: NO_DETAILS }))
+      .finally(() => inFlight.current.delete(target));
+  };
+
+  // A lookup that never finished (app closed mid-way) is picked up again when the sheet opens.
+  const pendingId = uid && selectedReal?.details?.status === "loading" ? selectedReal.id : null;
+  useEffect(() => {
+    if (uid && pendingId) {
+      const cur = latest.current.realSelections[uid];
+      if (cur) lookUp(uid, cur);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, pendingId]);
+
   const chooseRealProduct = (rp: RealShoppingProduct) => {
     if (!item || !p) return;
-    const target = item.uid;
-    const picked = { ...rp, category: p.category };
-    selectRealProduct(target, { ...picked, details: rp.page_token ? LOADING_DETAILS : NO_DETAILS });
-    // Look the product up once more for its real size and colour. If that fails it stays "size unknown".
-    if (rp.page_token) {
-      const stillChosen = () => {
-        const cur = latest.current.realSelections[target];
-        return !!cur && cur.id === rp.id && cur.url === rp.url;
-      };
-      fetchProductDetails(rp.page_token)
-        .then((details) => stillChosen() && selectRealProduct(target, { ...picked, details }))
-        .catch(() => stillChosen() && selectRealProduct(target, { ...picked, details: NO_DETAILS }));
-    }
+    const picked: RealProductSelection = { ...rp, category: p.category, details: rp.page_token ? LOADING_DETAILS : NO_DETAILS };
+    inFlight.current.delete(item.uid);
+    selectRealProduct(item.uid, picked);
+    lookUp(item.uid, picked);
     setMsg({ tone: "success", text: `Selected ${rp.title} for this layout position. Its shopping details will carry into your final plan and 3D handoff.` });
   };
 
