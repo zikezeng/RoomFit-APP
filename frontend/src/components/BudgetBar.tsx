@@ -15,7 +15,7 @@ export function BudgetBar({ total, budget }: { total: number; budget: number }) 
           Total <Text style={s.v} testID="budget-bar-total">{money(total)}</Text> of {money(budget)}
         </Text>
         <Text style={[s.k, { color: remaining >= 0 ? colors.success : colors.error, fontWeight: "700" }]} testID="budget-bar-remaining">
-          {money(remaining)} left
+          {remaining >= 0 ? `${money(remaining)} left` : `${money(-remaining)} over`}
         </Text>
       </View>
       <View style={s.bar}>
