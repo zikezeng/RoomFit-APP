@@ -58,6 +58,40 @@ export interface Product {
   description: string;
 }
 
+/** Real product chosen by the user in Step 8.
+ * Kept separate from Product/PlacedItem because the layout solver still relies on
+ * the proxy product's verified dimensions.
+ */
+export interface RealProductSelection {
+  id: string;
+  category: CategoryId;
+  title: string;
+  price: number | null;
+  price_text: string | null;
+  retailer: string;
+  url: string;
+  image: string | null;
+  rating: number | null;
+  reviews: number | null;
+  delivery: string | null;
+  direct_retailer: boolean;
+  /** Token for looking the product up again (size, colour). Missing on products saved before this existed. */
+  page_token?: string | null;
+  /** Filled after the user selects the product: real size and colour, when they could be found. */
+  details?: RealProductDetails;
+}
+
+/** Real-world facts about a selected product. Every size is cm; null = not found ("size unknown"). */
+export interface RealProductDetails {
+  status: "loading" | "ok" | "unavailable";
+  width: number | null;
+  depth: number | null;
+  height: number | null;
+  source: "specs" | "description" | "title" | null;
+  color: string | null; // main colour read from the product photo (#rrggbb)
+  colorName: string | null; // colour as the shop names it
+}
+
 export interface Pt {
   x: number;
   y: number;

@@ -1,5 +1,6 @@
 import Feather from "@react-native-vector-icons/feather";
-import React, { useState } from "react";
+import { Image } from "expo-image";
+import React, { useEffect, useRef, useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,23 +9,73 @@ import { Button, Notice, money } from "@/src/components/ui";
 import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
 import { buildGeom } from "@/src/lib/apartment";
+import { fitCheck, sizeText } from "@/src/lib/product-fit";
+import { LOADING_DETAILS, NO_DETAILS, RealShoppingProduct, fetchProductDetails, searchRealProducts } from "@/src/lib/real-products";
+import { RealProductSelection } from "@/src/lib/types";
 import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: () => void }) {
-  const { state, swap } = usePlan();
+  const { state, swap, selectRealProduct, clearRealProduct } = usePlan();
   const insets = useSafeAreaInsets();
   const s = useStyles();
   const { colors } = useTheme();
   const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [realProducts, setRealProducts] = useState<RealShoppingProduct[]>([]);
+  const [realLoading, setRealLoading] = useState(false);
+  const [realError, setRealError] = useState<string | null>(null);
   const item = state.plan?.find((i) => i.uid === uid);
   const roomId = item?.roomId ?? state.selectedRoomId;
   const geom = buildGeom(state.apartment, roomId);
   const budget = configsOf(state)[roomId!]?.budget ?? state.budget;
   const p = item ? getProduct(item.productId) : null;
+  const selectedReal = uid ? state.realSelections[uid] : undefined;
+  const latest = useRef(state);
+  const inFlight = useRef(new Set<string>());
+  useEffect(() => {
+    latest.current = state;
+  });
+  const isCustom = p?.category === "custom";
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
+
+  useEffect(() => {
+    let active = true;
+    if (!p || p.category === "custom") {
+      setRealProducts([]);
+      setRealError(null);
+      setRealLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setRealLoading(true);
+    setRealError(null);
+    searchRealProducts({
+      category: p.category,
+      styles: state.styles,
+      moods: state.moods,
+      referencePrice: p.price,
+    })
+      .then((products) => {
+        if (active) setRealProducts(products);
+      })
+      .catch((e) => {
+        if (active) {
+          setRealProducts([]);
+          setRealError(e instanceof Error ? e.message : "Could not load live shopping results.");
+        }
+      })
+      .finally(() => {
+        if (active) setRealLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [p?.id, p?.category, p?.price, state.styles.join("|"), state.moods.join("|")]);
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;
@@ -32,12 +83,50 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
     const r = swap(item.uid, pid);
     if (!r) return;
     if (r.valid) {
-      const d = np.price - p.price;
-      setMsg({ tone: "success", text: `Swapped to ${np.name}. Layout re-checked: all constraints pass. Total ${d <= 0 ? "decreased" : "increased"} by ${money(Math.abs(d))}.` });
+      setMsg({ tone: "success", text: `This spot is now ${np.width}×${np.depth}×${np.height} cm. Layout re-checked: everything still fits. Choose a real product for the new size.` });
     } else {
       const fails = r.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ");
-      setMsg({ tone: "error", text: `${np.name} can't replace this piece: ${fails} Choose one of the options marked "Fits".` });
+      setMsg({ tone: "error", text: `A ${np.width}×${np.depth} cm piece can't go here: ${fails} Choose one of the sizes marked "Fits".` });
     }
+  };
+
+  // Look a selected product up once more for its real size and colour. If that fails it stays "size unknown".
+  const lookUp = (target: string, picked: RealProductSelection) => {
+    if (!picked.page_token || inFlight.current.has(target)) return;
+    inFlight.current.add(target);
+    const stillChosen = () => {
+      const cur = latest.current.realSelections[target];
+      return !!cur && cur.id === picked.id && cur.url === picked.url;
+    };
+    fetchProductDetails(picked.page_token)
+      .then((details) => stillChosen() && selectRealProduct(target, { ...picked, details }))
+      .catch(() => stillChosen() && selectRealProduct(target, { ...picked, details: NO_DETAILS }))
+      .finally(() => inFlight.current.delete(target));
+  };
+
+  // A lookup that never finished (app closed mid-way) is picked up again when the sheet opens.
+  const pendingId = uid && selectedReal?.details?.status === "loading" ? selectedReal.id : null;
+  useEffect(() => {
+    if (uid && pendingId) {
+      const cur = latest.current.realSelections[uid];
+      if (cur) lookUp(uid, cur);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, pendingId]);
+
+  const chooseRealProduct = (rp: RealShoppingProduct) => {
+    if (!item || !p) return;
+    const picked: RealProductSelection = { ...rp, category: p.category, details: rp.page_token ? LOADING_DETAILS : NO_DETAILS };
+    inFlight.current.delete(item.uid);
+    selectRealProduct(item.uid, picked);
+    lookUp(item.uid, picked);
+    setMsg({ tone: "success", text: `Selected ${rp.title} for this layout position. Its shopping details will carry into your final plan and 3D handoff.` });
+  };
+
+  const removeRealProduct = () => {
+    if (!item) return;
+    clearRealProduct(item.uid);
+    setMsg({ tone: "success", text: "Removed the real product choice. This position is back to the layout planning item." });
   };
 
   return (
@@ -48,20 +137,61 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
         {p && item ? (
           <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
             <View style={s.headRow}>
-              <ProductSwatch category={p.category} style={p.styles[0]} size={96} />
+              {selectedReal?.image ? (
+                <Image source={{ uri: selectedReal.image }} style={s.headImage} contentFit="cover" transition={150} />
+              ) : (
+                <ProductSwatch category={p.category} style={p.styles[0]} size={96} />
+              )}
               <View style={{ flex: 1, gap: 4 }}>
-                <Text style={s.cat}>{CATEGORY_MAP[p.category].label}</Text>
-                <Text style={s.name} testID="product-sheet-name">
-                  {p.name}
+                <Text style={s.cat}>{isCustom ? CATEGORY_MAP[p.category].label : selectedReal ? CATEGORY_MAP[p.category].label : "Choose a product"}</Text>
+                <Text style={s.name} numberOfLines={3} testID="product-sheet-name">
+                  {selectedReal ? selectedReal.title : isCustom ? p.name : CATEGORY_MAP[p.category].label}
                 </Text>
-                <Text style={s.price} testID="product-sheet-price">
-                  {money(p.price)}
-                </Text>
+                {selectedReal ? (
+                  <Text style={s.price} testID="product-sheet-price">
+                    {selectedReal.price_text ?? (selectedReal.price !== null ? money(selectedReal.price) : "See price")}
+                  </Text>
+                ) : isCustom ? (
+                  <Text style={s.price} testID="product-sheet-price">
+                    {money(p.price)}
+                  </Text>
+                ) : (
+                  <Text style={s.caption}>Nothing chosen yet — pick a real product below.</Text>
+                )}
               </View>
               <Pressable onPress={onClose} testID="product-sheet-close" hitSlop={10} style={s.close}>
                 <Feather name="x" size={20} color={colors.onSurface} />
               </Pressable>
             </View>
+            {selectedReal ? (
+              <>
+                <View style={s.retail}>
+                  <Feather name="shopping-bag" size={16} color={colors.muted} />
+                  <Text style={s.desc} testID="product-sheet-retailer">
+                    {selectedReal.retailer}
+                  </Text>
+                </View>
+                <Button
+                  kind="secondary"
+                  small
+                  label={selectedReal.direct_retailer ? "View at retailer" : "Buying options"}
+                  icon="external-link"
+                  onPress={() => Linking.openURL(selectedReal.url)}
+                  testID="product-sheet-link"
+                />
+              </>
+            ) : null}
+            {selectedReal ? (
+              <View style={s.realSize} testID="product-sheet-real-size">
+                <Text style={s.specK}>Real size of this product</Text>
+                <Text style={s.specV}>{sizeText(selectedReal.details)}</Text>
+                {(() => {
+                  const fit = fitCheck(selectedReal.details, { width: p.width, depth: p.depth });
+                  return <Text style={[s.caption, { color: fit.level === "ok" ? colors.success : fit.level === "warn" ? colors.error : colors.muted }]} testID="product-sheet-fit">{fit.text}</Text>;
+                })()}
+              </View>
+            ) : null}
+            <Text style={s.caption}>{isCustom ? "Size of your own item:" : "Space this piece has in your layout — check a product's size against it before buying:"}</Text>
             <View style={s.specs}>
               {[
                 ["Width", p.width],
@@ -76,46 +206,91 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                 </View>
               ))}
             </View>
-            <View style={s.tags}>
-              {p.styles.map((st) => (
-                <Text key={st} style={s.tag}>
-                  {STYLE_LABEL[st]}
-                </Text>
-              ))}
-              <Text style={s.tag}>{p.mood}</Text>
-            </View>
-            <Text style={s.desc}>{p.description}</Text>
-            <View style={s.retail}>
-              <Feather name="shopping-bag" size={16} color={colors.muted} />
-              <Text style={s.desc} testID="product-sheet-retailer">
-                {p.retailer}
+            {isCustom ? <Text style={s.desc}>{p.description}</Text> : null}
+
+            <View style={s.sectionBlock}>
+              <Text style={s.section}>Shop real products</Text>
+              <Text style={s.caption}>
+                Live product data via Google Shopping, matched to this furniture type, your selected style, mood and approximate price. Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
               </Text>
+              {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
+              {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
+              {!realLoading && !realError && !realProducts.length ? (
+                <Text style={s.caption}>No live shopping matches found right now.</Text>
+              ) : null}
+              {realProducts.map((rp, i) => {
+                const isSelected = selectedReal?.id === rp.id && selectedReal?.url === rp.url;
+                return (
+                  <View key={rp.id + i} style={[s.realCard, isSelected && s.realCardSelected]} testID={`real-product-${i}`}>
+                    {rp.image ? (
+                      <Image source={{ uri: rp.image }} style={s.realImage} contentFit="cover" transition={150} />
+                    ) : (
+                      <ProductSwatch category={p.category} style={p.styles[0]} size={72} />
+                    )}
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={s.altName} numberOfLines={2}>{rp.title}</Text>
+                      <Text style={s.caption}>{rp.retailer}</Text>
+                      <Text style={s.realPrice}>{rp.price_text ?? (rp.price !== null ? money(rp.price) : "See price")}</Text>
+                      {rp.rating ? (
+                        <Text style={s.caption}>★ {rp.rating}{rp.reviews ? ` · ${rp.reviews.toLocaleString()} reviews` : ""}</Text>
+                      ) : null}
+                      {rp.delivery ? <Text style={s.caption}>{rp.delivery}</Text> : null}
+                      {isSelected ? <Text style={s.selectedText}>✓ Selected for this layout</Text> : null}
+                    </View>
+                    <View style={s.realActions}>
+                      <Button
+                        small
+                        kind={isSelected ? "primary" : "secondary"}
+                        label={isSelected ? "Selected" : "Select product"}
+                        icon={isSelected ? "check" : undefined}
+                        onPress={() => chooseRealProduct(rp)}
+                        testID={`real-product-select-${i}`}
+                      />
+                      <Button
+                        small
+                        kind="ghost"
+                        label={rp.direct_retailer ? "Shop now" : "Buying options"}
+                        icon="external-link"
+                        onPress={() => Linking.openURL(rp.url)}
+                        testID={`real-product-link-${i}`}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+              {selectedReal ? (
+                <Button
+                  small
+                  kind="ghost"
+                  label="Clear selected real product"
+                  icon="x"
+                  onPress={removeRealProduct}
+                  testID="clear-real-product"
+                />
+              ) : null}
             </View>
-            {p.url ? (
-              <Button kind="secondary" small label="View at retailer" icon="external-link" onPress={() => Linking.openURL(p.url!)} testID="product-sheet-link" />
-            ) : (
-              <Text style={s.caption}>No verified retailer link — demo catalog product.</Text>
-            )}
+
             {msg ? <Notice tone={msg.tone} text={msg.text} testID="swap-result-message" /> : null}
-            <Text style={s.section}>Alternatives</Text>
-            <Text style={s.caption}>Ranked by style tags among options that fit your room, door clearance, walkways and budget.</Text>
-            {alts.map((a) => (
+            <Text style={s.section}>Other sizes for this spot</Text>
+            <Text style={s.caption}>Need a bigger or smaller piece here? Pick another size and the layout is re-checked against your room, door clearance and walkways. Changing the size clears the product chosen for this spot.</Text>
+            {alts
+              .filter((a, i) => {
+                const size = (x: typeof a.product) => `${x.width}x${x.depth}x${x.height}`;
+                return size(a.product) !== size(p) && alts.findIndex((b) => size(b.product) === size(a.product)) === i;
+              })
+              .map((a) => (
               <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
                 <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.altName}>{a.product.name}</Text>
-                  <Text style={s.caption}>
-                    {a.product.width}×{a.product.depth}×{a.product.height} cm · {STYLE_LABEL[a.product.styles[0]]}
+                  <Text style={s.altName}>
+                    {a.product.width}×{a.product.depth}×{a.product.height} cm
                   </Text>
-                  <Text style={[s.caption, { color: a.delta <= 0 ? colors.success : colors.warning, fontWeight: "600" }]}>
-                    {money(a.product.price)} ({a.delta <= 0 ? "−" : "+"}
-                    {money(Math.abs(a.delta))})
-                  </Text>
+                  <Text style={s.caption}>{STYLE_LABEL[a.product.styles[0]]} look</Text>
                   <Text style={[s.caption, { color: a.ok ? colors.success : colors.error }]} numberOfLines={2}>
                     {a.ok ? "Fits — all checks pass" : a.reason}
                   </Text>
                 </View>
-                <Button small kind={a.ok ? "primary" : "secondary"} label="Swap" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
+                <Button small kind={a.ok ? "primary" : "secondary"} label="Use size" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
               </View>
             ))}
           </ScrollView>
@@ -130,20 +305,27 @@ const useStyles = makeStyles((c) => ({
   sheet: { maxHeight: "82%", backgroundColor: c.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   handle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: c.borderStrong, marginBottom: spacing.md },
   headRow: { flexDirection: "row", gap: spacing.lg, alignItems: "center" },
+  headImage: { width: 96, height: 96, borderRadius: radius.md, backgroundColor: c.surfaceTertiary },
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center", alignSelf: "flex-start" },
   cat: { fontFamily: fonts.text, fontSize: 12, color: c.muted, textTransform: "uppercase", letterSpacing: 1 },
   name: { fontFamily: fonts.display, fontSize: 22, color: c.onSurface },
   price: { fontFamily: fonts.text, fontSize: 18, fontWeight: "700", color: c.brandPrimary },
   specs: { flexDirection: "row", gap: spacing.sm },
   spec: { flex: 1, backgroundColor: c.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: c.border },
+  realSize: { gap: 2, backgroundColor: c.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: c.border },
   specK: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
   specV: { fontFamily: fonts.text, fontSize: 16, fontWeight: "600", color: c.onSurface },
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  tag: { fontFamily: fonts.text, fontSize: 12, color: c.onBrandTertiary, backgroundColor: c.brandTertiary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, overflow: "hidden", textTransform: "capitalize" },
   desc: { fontFamily: fonts.text, fontSize: 14, lineHeight: 21, color: c.onSurfaceTertiary },
   retail: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   caption: { fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },
   section: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
+  sectionBlock: { gap: spacing.md },
+  realCard: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
+  realCardSelected: { borderColor: c.success, borderWidth: 2 },
+  realImage: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: c.surfaceTertiary },
+  realPrice: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.brandPrimary },
+  selectedText: { fontFamily: fonts.text, fontSize: 12, fontWeight: "700", color: c.success },
+  realActions: { gap: spacing.xs, alignItems: "stretch" },
   alt: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
   altName: { fontFamily: fonts.text, fontSize: 14, fontWeight: "600", color: c.onSurface },
 }));

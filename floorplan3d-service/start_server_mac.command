@@ -86,5 +86,13 @@ echo " 用的时候不要关这个窗口；按 Ctrl+C 停止服务器。"
 echo "=============================================="
 echo ""
 
+# Optional local secrets such as SERPAPI_KEY. This file is gitignored.
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 export CUBICASA_CHECKPOINT=weights/cubicasa5k.pkl CUBICASA_REPO=cubicasa
 exec python -m uvicorn app:app --host 0.0.0.0 --port 8001

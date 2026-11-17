@@ -32,6 +32,7 @@ memory/PRD.md          Product history and decisions so far.
 | 7. Layouts | `app/plan/layouts.tsx` |
 | 8. Shop / swap products | `app/plan/shop.tsx` |
 | 9. Results / shopping list | `app/plan/results.tsx` |
+| 9b. Furnished room in 3D | `app/plan/preview3d.tsx` |
 
 ### Shared files (changing these affects every page — coordinate with the team first)
 
@@ -46,6 +47,9 @@ memory/PRD.md          Product history and decisions so far.
 - `src/lib/solver.ts` — furniture layout solver (fit, walkways, door swing, budget).
 - `src/lib/catalog.ts` — demo product catalog. `src/lib/apartment.ts` — room geometry and names.
 - `src/lib/ai.ts` — calls `/api/floorplan/segment` during upload.
+- `src/lib/shopping-totals.ts` — the one place that adds up money for steps 8 and 9 (real choices only).
+- `src/lib/product-fit.ts` — real size text, fit check against the layout space, colour and shape hints for a selected product.
+- `src/lib/furnished3d.ts`, `src/components/Furnished3DView.tsx` — furnished 3D preview: builds the room + furniture scene from the chosen layout and `state.realSelections`, drawn with three.js in a WebView (iframe on web). No server needed.
 - `src/lib/floorplan3d.ts`, `src/components/Model3DView.tsx` — 3D page: calls `/api/floorplan/3d`, shows the .glb with `<model-viewer>` in a WebView (iframe on web).
 
 Page files also contain small pieces of logic (saving choices, navigation). When redesigning a page, keep those.
@@ -53,7 +57,8 @@ Page files also contain small pieces of logic (saving choices, navigation). When
 ## Floor plan server (floorplan3d-service/)
 
 - `roomfit_3d.py` — CubiCasa5K inference (`Recognizer`), mask → rooms/walls/doors/windows (`extract_geometry`), 3D extrusion (`build_scene`).
-- `app.py` — FastAPI: `GET /api/`, `POST /api/floorplan/segment`, `POST /api/floorplan/3d`.
+- `app.py` — FastAPI: `GET /api/`, `POST /api/floorplan/segment`, `POST /api/floorplan/3d`, `GET /api/products/search` (live shopping results), `GET /api/products/detail` (size + main colour of one selected product).
+- `product_details.py` — reads width/depth/height out of a product's specs, description or title, and the main colour out of its photo. Self-test: `python product_details.py`.
 - The CubiCasa5K model code (github.com/Aswi-ni/CubicasaRoomSegmentation) and weights (`cubicasa5k.pkl`, 209 MB) are downloaded at start-up, not stored in the repo.
 - Ways to run it: `start_server_mac.command` (own Mac), `RoomFit_Server_Colab.ipynb` (Colab), `Dockerfile` (Hugging Face Spaces / Docker). See its README.
 

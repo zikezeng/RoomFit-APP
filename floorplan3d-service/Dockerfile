@@ -21,7 +21,7 @@ RUN git clone https://github.com/Aswi-ni/CubicasaRoomSegmentation.git cubicasa \
 RUN mkdir -p weights && python -c "import gdown; gdown.download(id='1gRB7ez1e4H7a9Y09lLqRuna0luZO5VRK', output='weights/cubicasa5k.pkl', quiet=False)" \
     && test -s weights/cubicasa5k.pkl
 
-COPY --chown=user app.py roomfit_3d.py ./
+COPY --chown=user app.py roomfit_3d.py product_details.py ./
 
 EXPOSE 7860
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
