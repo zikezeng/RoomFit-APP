@@ -9,7 +9,7 @@ import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { KIND_LABEL, buildGeom, pointInPoly, roomStats } from "@/src/lib/apartment";
 import { FURNISHABLE } from "@/src/lib/catalog";
 import { fmtAreaCm2, fmtLen } from "@/src/lib/geometry";
-import { roomRank, usePlan } from "@/src/state/plan-store";
+import { rebalanceRoomBudgets, roomRank, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
@@ -32,6 +32,12 @@ export default function RoomsStep() {
   const rooms = [...ap.rooms].sort((a, b) => roomRank(a.kind) - roomRank(b.kind));
   const selectedCount = state.selectedRoomIds.length;
   const canContinue = validBudget && selectedCount > 0 && state.selectedRoomIds.every(id => !!buildGeom(ap, id));
+  // Preview the same room-level allocation that will be saved when continuing.
+  // This also updates immediately when rooms are selected or the total is edited.
+  const split = rebalanceRoomBudgets({
+    ...state,
+    apartmentBudget: validBudget ? Math.round(budgetNumber) : state.apartmentBudget,
+  });
 
   return (
     <WizardScaffold
@@ -89,6 +95,20 @@ export default function RoomsStep() {
         {!validBudget ? (
           <Notice tone="error" text={`Enter a total budget between ${money(300)} and ${money(150000)}.`} testID="rooms-budget-error" />
         ) : null}
+        {selectedCount > 0 ? (
+          <View style={s.roomBudgetList} testID="rooms-budget-by-room">
+            <Text style={s.roomBudgetHeading}>Budget by room</Text>
+            {rooms.filter(room => state.selectedRoomIds.includes(room.id)).map(room => (
+              <View key={room.id} style={s.roomBudgetRow}>
+                <Text style={s.roomBudgetName}>{room.label}</Text>
+                <Text style={s.roomBudgetAmount} testID={`room-budget-${room.id}`}>
+                  {money(split.roomProgress[room.id]?.budget ?? 0)}
+                </Text>
+              </View>
+            ))}
+            <Text style={s.budgetHint}>Automatically allocated across your selected rooms.</Text>
+          </View>
+        ) : null}
       </Card>
     </WizardScaffold>
   );
@@ -96,6 +116,11 @@ export default function RoomsStep() {
 
 const useStyles = makeStyles((c) => ({
   budgetCard: { gap: spacing.md },
+  roomBudgetList: { gap: spacing.sm, borderTopWidth: 1, borderTopColor: c.border, paddingTop: spacing.md },
+  roomBudgetHeading: { fontFamily: fonts.text, fontWeight: "700", fontSize: 15, color: c.onSurface },
+  roomBudgetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md },
+  roomBudgetName: { flex: 1, fontFamily: fonts.text, fontSize: 14, color: c.onSurface },
+  roomBudgetAmount: { fontFamily: fonts.text, fontWeight: "700", fontSize: 16, color: c.brandPrimary },
   budgetTitle: { fontFamily: fonts.display, fontSize: 20, color: c.onSurface },
   budgetHint: { fontFamily: fonts.text, fontSize: 13, color: c.muted },
   budgetInputRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: c.border, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: c.surfaceSecondary },
