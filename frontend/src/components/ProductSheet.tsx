@@ -1,5 +1,6 @@
 import Feather from "@react-native-vector-icons/feather";
-import React, { useState } from "react";
+import { Image } from "expo-image";
+import React, { useEffect, useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,6 +9,7 @@ import { Button, Notice, money } from "@/src/components/ui";
 import { CATEGORY_MAP, STYLE_LABEL, getProduct } from "@/src/lib/catalog";
 import { alternativesFor } from "@/src/lib/solver";
 import { buildGeom } from "@/src/lib/apartment";
+import { RealShoppingProduct, searchRealProducts } from "@/src/lib/real-products";
 import { configsOf, usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -17,6 +19,9 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const s = useStyles();
   const { colors } = useTheme();
   const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [realProducts, setRealProducts] = useState<RealShoppingProduct[]>([]);
+  const [realLoading, setRealLoading] = useState(false);
+  const [realError, setRealError] = useState<string | null>(null);
   const item = state.plan?.find((i) => i.uid === uid);
   const roomId = item?.roomId ?? state.selectedRoomId;
   const geom = buildGeom(state.apartment, roomId);
@@ -25,6 +30,43 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
+
+  useEffect(() => {
+    let active = true;
+    if (!p || p.category === "custom") {
+      setRealProducts([]);
+      setRealError(null);
+      setRealLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setRealLoading(true);
+    setRealError(null);
+    searchRealProducts({
+      category: p.category,
+      styles: state.styles,
+      moods: state.moods,
+      referencePrice: p.price,
+    })
+      .then((products) => {
+        if (active) setRealProducts(products);
+      })
+      .catch((e) => {
+        if (active) {
+          setRealProducts([]);
+          setRealError(e instanceof Error ? e.message : "Could not load live shopping results.");
+        }
+      })
+      .finally(() => {
+        if (active) setRealLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [p?.id, p?.category, p?.price, state.styles.join("|"), state.moods.join("|")]);
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;
@@ -94,11 +136,50 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
             {p.url ? (
               <Button kind="secondary" small label="View at retailer" icon="external-link" onPress={() => Linking.openURL(p.url!)} testID="product-sheet-link" />
             ) : (
-              <Text style={s.caption}>No verified retailer link — demo catalog product.</Text>
+              <Text style={s.caption}>This planning item uses verified demo dimensions. Live products you can actually shop appear below.</Text>
             )}
+
+            <View style={s.sectionBlock}>
+              <Text style={s.section}>Shop real products</Text>
+              <Text style={s.caption}>
+                Live U.S. shopping matches based on this furniture type, your selected style, mood and approximate price. These products are for shopping discovery only until we verify their exact dimensions.
+              </Text>
+              {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
+              {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
+              {!realLoading && !realError && !realProducts.length ? (
+                <Text style={s.caption}>No live shopping matches found right now.</Text>
+              ) : null}
+              {realProducts.map((rp, i) => (
+                <View key={rp.id + i} style={s.realCard} testID={`real-product-${i}`}>
+                  {rp.image ? (
+                    <Image source={{ uri: rp.image }} style={s.realImage} contentFit="cover" transition={150} />
+                  ) : (
+                    <ProductSwatch category={p.category} style={p.styles[0]} size={72} />
+                  )}
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={s.altName} numberOfLines={2}>{rp.title}</Text>
+                    <Text style={s.caption}>{rp.retailer}</Text>
+                    <Text style={s.realPrice}>{rp.price_text ?? (rp.price !== null ? money(rp.price) : "See price")}</Text>
+                    {rp.rating ? (
+                      <Text style={s.caption}>★ {rp.rating}{rp.reviews ? ` · ${rp.reviews.toLocaleString()} reviews` : ""}</Text>
+                    ) : null}
+                    {rp.delivery ? <Text style={s.caption}>{rp.delivery}</Text> : null}
+                  </View>
+                  <Button
+                    small
+                    kind="secondary"
+                    label={rp.direct_retailer ? "View at retailer" : "View product"}
+                    icon="external-link"
+                    onPress={() => Linking.openURL(rp.url)}
+                    testID={`real-product-link-${i}`}
+                  />
+                </View>
+              ))}
+            </View>
+
             {msg ? <Notice tone={msg.tone} text={msg.text} testID="swap-result-message" /> : null}
-            <Text style={s.section}>Alternatives</Text>
-            <Text style={s.caption}>Ranked by style tags among options that fit your room, door clearance, walkways and budget.</Text>
+            <Text style={s.section}>Layout-safe alternatives</Text>
+            <Text style={s.caption}>Demo catalog options with known dimensions, ranked by style and re-checked against your room, door clearance, walkways and budget.</Text>
             {alts.map((a) => (
               <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
                 <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
@@ -144,6 +225,10 @@ const useStyles = makeStyles((c) => ({
   retail: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
   caption: { fontFamily: fonts.text, fontSize: 12, lineHeight: 17, color: c.muted },
   section: { fontFamily: fonts.display, fontSize: 18, color: c.onSurface },
+  sectionBlock: { gap: spacing.md },
+  realCard: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
+  realImage: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: c.surfaceTertiary },
+  realPrice: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.brandPrimary },
   alt: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
   altName: { fontFamily: fonts.text, fontSize: 14, fontWeight: "600", color: c.onSurface },
 }));
