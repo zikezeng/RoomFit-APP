@@ -14,7 +14,7 @@ import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 export default function RoomsStep() {
   const router = useRouter();
-  const { state, selectRoom, startRooms, setApartmentBudget, setRoomBudgets } = usePlan();
+  const { state, selectRoom, startRooms, setApartmentBudget, setRoomBudgets, setBudgetPlan } = usePlan();
   const [roomDrafts, setRoomDrafts] = useState<Record<string, string>>({});
   const [budgetDraft, setBudgetDraft] = useState(String(state.apartmentBudget));
   const [editingBudget, setEditingBudget] = useState(false);
@@ -55,6 +55,9 @@ export default function RoomsStep() {
     const draft = roomDrafts[id];
     if (draft == null) return;
     if (!draft.length || !Number.isFinite(Number(draft)) || allocated > budgetNumber || !validBudget) return;
+    // When the total was edited in the same visit, defer saving until Continue,
+    // where both values are committed atomically.
+    if (Math.round(budgetNumber) !== state.apartmentBudget) return;
     setRoomBudgets({ [id]: Math.round(Number(draft)) });
     setRoomDrafts(previous => {
       const next = { ...previous };
@@ -68,8 +71,9 @@ export default function RoomsStep() {
       const draft = roomDrafts[room.id];
       if (draft != null) changes[room.id] = Math.round(Number(draft));
     }
-    if (Object.keys(changes).length) setRoomBudgets(changes);
+    setBudgetPlan(Math.round(budgetNumber), changes);
     setRoomDrafts({});
+    setEditingBudget(false);
   };
 
   return (
@@ -78,7 +82,7 @@ export default function RoomsStep() {
       title="Which Rooms Would You Like to Furnish?"
       subtitle="Choose all the rooms you want to furnish. Tap the floor plan or the list to select multiple rooms."
       keyboardAware
-      cta={{ label: selectedCount ? `Furnish ${selectedCount} ${selectedCount === 1 ? "room" : "rooms"}` : "Select rooms", disabled: !canContinue, onPress: () => { commitBudget(); saveAllRoomBudgets(); startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
+      cta={{ label: selectedCount ? `Furnish ${selectedCount} ${selectedCount === 1 ? "room" : "rooms"}` : "Select rooms", disabled: !canContinue, onPress: () => { saveAllRoomBudgets(); startRooms(); router.push("/plan/furniture"); }, testID: "rooms-continue-button" }}
     >
       <PlanCanvas
         ap={ap}
