@@ -1,5 +1,6 @@
 import { getProduct } from "./catalog";
-import { PlacedItem, RealProductSelection } from "./types";
+import { GenInput, perUnitAllocation } from "./solver";
+import { CategoryId, PlacedItem, RealProductSelection } from "./types";
 
 /** How one layout position counts towards the budget. */
 export type ShoppingLine =
@@ -42,33 +43,66 @@ export function shoppingTotals(rows: { item: PlacedItem; real?: RealProductSelec
 }
 
 /** Text under the budget bar: what is still open and roughly what is left per piece. */
-export function budgetNote(t: ShoppingTotals, budget: number, fmt: (n: number) => string): string {
-  const remaining = budget - t.spent;
+// Per-piece amounts come from the Step 6 budget for each furniture type (see spotBudget), so the note
+// only says how many pieces are left rather than splitting the room budget evenly.
+export function budgetNote(t: ShoppingTotals, _budget: number, _fmt: (n: number) => string): string {
   const pieces = `${t.toChoose} ${t.toChoose === 1 ? "piece" : "pieces"} still to choose`;
   return [
-    t.toChoose === 0 ? "All pieces chosen" : remaining > 0 ? `${pieces} · about ${fmt(Math.floor(remaining / t.toChoose))} each` : pieces,
+    t.toChoose === 0 ? "All pieces chosen" : pieces,
     t.unpriced > 0 ? `${t.unpriced} chosen without a listed price (not counted)` : null,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
+export interface SpotBudget {
+  /** Price limit for this one piece (USD). 0 = this category's Step 6 budget is already used up. */
+  cap: number;
+  category: CategoryId;
+  /** Step 6 budget for the whole category in this room (all pieces of that type). */
+  categoryTarget: number;
+  /** Pieces of this type in the room, and how many are still open (this one included). */
+  qty: number;
+  open: number;
+  /** Real prices already spent on OTHER pieces of the same type. */
+  spentByOthers: number;
+}
+
+/** The parts of a room's Step 4–6 settings the budget needs. */
+export interface RoomBudgetSettings {
+  needs: GenInput["needs"];
+  categoryBudgets?: Partial<Record<CategoryId, number>>;
+  allocations: GenInput["allocations"];
+  budget: number;
+  customItems: { price: number }[];
+}
+
 /**
- * How much of the room budget this spot can use when searching for a product (USD).
- * Money left = room budget − what the OTHER chosen pieces in the room cost (real prices; custom items at
- * the price entered). That money is shared among the pieces still to choose (this one included) in
- * proportion to their planned prices, so a bed gets a bigger share than a lamp. The planned (demo)
- * price is used only as that weight, never as the limit itself. Returns null when no money is left.
+ * Price limit for one piece, taken from the user's Step 6 budget for its furniture type.
+ * Step 6 stores a total per type ("2× Dining chair: $200"). Real prices already chosen for other pieces
+ * of that type are subtracted, and the rest is split evenly over the pieces still to choose (this one
+ * included). When Step 6 was left untouched, the default split shown there is used — the same numbers
+ * the layout solver uses. Returns null for the user's own custom items.
  */
-export function spotBudget(plan: PlacedItem[], real: Record<string, RealProductSelection | undefined>, uid: string, roomBudget: number): number | null {
-  const others = plan.filter((it) => it.uid !== uid);
-  const spentElsewhere = shoppingTotals(others.map((item) => ({ item, real: real[item.uid] }))).spent;
-  const left = roomBudget - spentElsewhere;
-  if (left <= 0) return null;
-  const open = plan.filter((it) => it.uid === uid || (!real[it.uid] && getProduct(it.productId).category !== "custom"));
-  const weight = (it: PlacedItem) => Math.max(1, getProduct(it.productId).price);
-  const total = open.reduce((s, it) => s + weight(it), 0);
+export function spotBudget(cfg: RoomBudgetSettings, plan: PlacedItem[], real: Record<string, RealProductSelection | undefined>, uid: string): SpotBudget | null {
   const me = plan.find((it) => it.uid === uid);
-  if (!me || total <= 0) return null;
-  return Math.round((left * weight(me)) / total);
+  if (!me) return null;
+  const category = getProduct(me.productId).category;
+  if (category === "custom") return null;
+  const same = plan.filter((it) => getProduct(it.productId).category === category);
+  const qty = Math.max(cfg.needs[category]?.qty ?? 0, same.length, 1);
+  const explicit = cfg.categoryBudgets?.[category];
+  const customCost = cfg.customItems.reduce((s, x) => s + x.price, 0);
+  const perUnitDefault = perUnitAllocation(cfg.needs, cfg.allocations, Math.max(0, cfg.budget - customCost))[category] ?? 0;
+  const categoryTarget = typeof explicit === "number" && Number.isFinite(explicit) ? Math.max(0, explicit) : perUnitDefault * qty;
+  let spentByOthers = 0;
+  let open = 1;
+  for (const it of same) {
+    if (it.uid === uid) continue;
+    const sel = real[it.uid];
+    if (!sel) open += 1;
+    else if (typeof sel.price === "number" && Number.isFinite(sel.price)) spentByOthers += sel.price;
+  }
+  const left = categoryTarget - spentByOthers;
+  return { cap: left > 0 ? Math.floor(left / open) : 0, category, categoryTarget: Math.round(categoryTarget), qty, open, spentByOthers: Math.round(spentByOthers) };
 }

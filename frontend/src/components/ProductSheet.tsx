@@ -38,8 +38,24 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   });
   const isCustom = p?.category === "custom";
   const roomPlan = (state.plan ?? []).filter((i) => (i.roomId ?? state.selectedRoomId) === roomId);
-  // This spot's share of the money still left in the room budget — the price limit for the search.
-  const spotCap = item ? spotBudget(roomPlan, state.realSelections, item.uid, budget) : null;
+  // Price limit for this piece from the user's Step 6 budget for this furniture type.
+  const roomCfg = roomId ? configsOf(state)[roomId] : undefined;
+  const sb = item && roomCfg ? spotBudget(roomCfg, roomPlan, state.realSelections, item.uid) : null;
+  const spotCap = sb && sb.cap > 0 ? sb.cap : null;
+  const typeName = p ? (p.category === "custom" ? p.name : CATEGORY_MAP[p.category].label.toLowerCase()) : "";
+  // Google treats "under $X" as a hint, so results are also filtered here. If too few are within the
+  // limit, a few over-budget ones are shown after them, marked with how much they go over.
+  const MAX_SHOWN = 6;
+  const within = spotCap === null ? realProducts : realProducts.filter((rp) => rp.price === null || rp.price <= spotCap);
+  const over = spotCap === null ? [] : realProducts.filter((rp) => rp.price !== null && rp.price > spotCap).sort((a, b) => a.price! - b.price!);
+  const shown = [...within.slice(0, MAX_SHOWN), ...(within.length < 3 ? over.slice(0, MAX_SHOWN - Math.min(within.length, MAX_SHOWN)) : [])];
+  const budgetLine = !sb
+    ? ""
+    : sb.cap <= 0
+      ? `Your Step 6 budget for ${sb.qty > 1 ? `${sb.qty}× ` : ""}${typeName} (${money(sb.categoryTarget)}) is already used by the pieces you chose, so prices are not limited.`
+      : sb.qty > 1
+        ? `Showing products up to ${money(sb.cap)} each — your Step 6 budget is ${money(sb.categoryTarget)} for ${sb.qty}× ${typeName}${sb.spentByOthers ? `, ${money(sb.spentByOthers)} already chosen` : ""}.`
+        : `Showing products up to ${money(sb.cap)} — your Step 6 budget for this ${typeName}.`;
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
@@ -80,7 +96,7 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p?.id, p?.category, spotCap === null ? null : Math.ceil(spotCap / 10), state.styles.join("|"), state.moods.join("|")]);
+  }, [p?.id, p?.category, spotCap, state.styles.join("|"), state.moods.join("|")]);
 
   const doSwap = (pid: string) => {
     if (!item || !p) return;
@@ -216,14 +232,21 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
             <View style={s.sectionBlock}>
               <Text style={s.section}>Shop real products</Text>
               <Text style={s.caption}>
-                Live product data via Google Shopping, matched to this furniture type and your selected style and mood{spotCap !== null && spotCap >= 30 ? `, up to about $${Math.ceil(spotCap / 10) * 10} (this piece's share of the budget left in this room)` : ", with no price limit because this room's budget is used up"}. Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
+                Live product data via Google Shopping, matched to this furniture type and your selected style and mood. {budgetLine} Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
               </Text>
               {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
               {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
               {!realLoading && !realError && !realProducts.length ? (
                 <Text style={s.caption}>No live shopping matches found right now.</Text>
               ) : null}
-              {realProducts.map((rp, i) => {
+              {!realLoading && !realError && realProducts.length > 0 && spotCap !== null && within.length < 3 ? (
+                <Notice
+                  tone="warning"
+                  text={within.length ? `Only ${within.length} ${within.length === 1 ? "match is" : "matches are"} within ${money(spotCap)}. A few cheaper options above it are listed after ${within.length === 1 ? "it" : "them"}.` : `No matches within ${money(spotCap)}. These are the cheapest found — raise this budget in Step 6 or pick one anyway.`}
+                  testID="real-shopping-over-budget"
+                />
+              ) : null}
+              {shown.map((rp, i) => {
                 const isSelected = selectedReal?.id === rp.id && selectedReal?.url === rp.url;
                 return (
                   <View key={rp.id + i} style={[s.realCard, isSelected && s.realCardSelected]} testID={`real-product-${i}`}>
@@ -236,6 +259,9 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                       <Text style={s.altName} numberOfLines={2}>{rp.title}</Text>
                       <Text style={s.caption}>{rp.retailer}</Text>
                       <Text style={s.realPrice}>{rp.price_text ?? (rp.price !== null ? money(rp.price) : "See price")}</Text>
+                      {spotCap !== null && rp.price !== null && rp.price > spotCap ? (
+                        <Text style={s.overText} testID={`real-product-over-${i}`}>{money(rp.price - spotCap)} over your budget</Text>
+                      ) : null}
                       {rp.rating ? (
                         <Text style={s.caption}>★ {rp.rating}{rp.reviews ? ` · ${rp.reviews.toLocaleString()} reviews` : ""}</Text>
                       ) : null}
@@ -329,6 +355,7 @@ const useStyles = makeStyles((c) => ({
   realCardSelected: { borderColor: c.success, borderWidth: 2 },
   realImage: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: c.surfaceTertiary },
   realPrice: { fontFamily: fonts.text, fontSize: 15, fontWeight: "700", color: c.brandPrimary },
+  overText: { fontFamily: fonts.text, fontSize: 12, fontWeight: "600", color: c.error },
   selectedText: { fontFamily: fonts.text, fontSize: 12, fontWeight: "700", color: c.success },
   realActions: { gap: spacing.xs, alignItems: "stretch" },
   alt: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: c.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: c.border },
