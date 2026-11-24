@@ -1,7 +1,7 @@
 import Feather from "@react-native-vector-icons/feather";
 import { Image } from "expo-image";
 import React, { useEffect, useRef, useState } from "react";
-import { Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProductSwatch } from "@/src/components/ProductSwatch";
@@ -42,20 +42,13 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
   const roomCfg = roomId ? configsOf(state)[roomId] : undefined;
   const sb = item && roomCfg ? spotBudget(roomCfg, roomPlan, state.realSelections, item.uid) : null;
   const spotCap = sb && sb.cap > 0 ? sb.cap : null;
-  const typeName = p ? (p.category === "custom" ? p.name : CATEGORY_MAP[p.category].label.toLowerCase()) : "";
   // Google treats "under $X" as a hint, so results are also filtered here. If too few are within the
   // limit, a few over-budget ones are shown after them, marked with how much they go over.
   const MAX_SHOWN = 6;
   const within = spotCap === null ? realProducts : realProducts.filter((rp) => rp.price === null || rp.price <= spotCap);
   const over = spotCap === null ? [] : realProducts.filter((rp) => rp.price !== null && rp.price > spotCap).sort((a, b) => a.price! - b.price!);
   const shown = [...within.slice(0, MAX_SHOWN), ...(within.length < 3 ? over.slice(0, MAX_SHOWN - Math.min(within.length, MAX_SHOWN)) : [])];
-  const budgetLine = !sb
-    ? ""
-    : sb.cap <= 0
-      ? `Your Step 6 budget for ${sb.qty > 1 ? `${sb.qty}× ` : ""}${typeName} (${money(sb.categoryTarget)}) is already used by the pieces you chose, so prices are not limited.`
-      : sb.qty > 1
-        ? `Showing products up to ${money(sb.cap)} each — your Step 6 budget is ${money(sb.categoryTarget)} for ${sb.qty}× ${typeName}${sb.spentByOthers ? `, ${money(sb.spentByOthers)} already chosen` : ""}.`
-        : `Showing products up to ${money(sb.cap)} — your Step 6 budget for this ${typeName}.`;
+  
   const alts = item && state.plan && geom
     ? alternativesFor(geom, state.plan.filter((i) => (i.roomId ?? state.selectedRoomId) === roomId), item.uid, budget, { styles: state.styles, moods: state.moods })
     : [];
@@ -231,10 +224,12 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
 
             <View style={s.sectionBlock}>
               <Text style={s.section}>Shop real products</Text>
-              <Text style={s.caption}>
-                Live product data via Google Shopping, matched to this furniture type and your selected style and mood. {budgetLine} Use these results for shopping discovery; they are not used to change your layout until exact dimensions are verified.
-              </Text>
-              {realLoading ? <Text style={s.caption}>Searching live products…</Text> : null}
+
+              {realLoading ? (
+                <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: spacing.lg }}>
+                  <ActivityIndicator size="small" color={colors.brandPrimary} />
+                </View>
+              ) : null}
               {realError ? <Notice tone="warning" text={realError} testID="real-shopping-error" /> : null}
               {!realLoading && !realError && !realProducts.length ? (
                 <Text style={s.caption}>No live shopping matches found right now.</Text>
@@ -310,20 +305,20 @@ export function ProductSheet({ uid, onClose }: { uid: string | null; onClose: ()
                 return size(a.product) !== size(p) && alts.findIndex((b) => size(b.product) === size(a.product)) === i;
               })
               .map((a) => (
-              <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
-                <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={s.altName}>
-                    {a.product.width}×{a.product.depth}×{a.product.height} cm
-                  </Text>
-                  <Text style={s.caption}>{STYLE_LABEL[a.product.styles[0]]} look</Text>
-                  <Text style={[s.caption, { color: a.ok ? colors.success : colors.error }]} numberOfLines={2}>
-                    {a.ok ? "Fits — all checks pass" : a.reason}
-                  </Text>
+                <View key={a.product.id} style={[s.alt, !a.ok && { opacity: 0.6 }]} testID={`alt-${a.product.id}`}>
+                  <ProductSwatch category={a.product.category} style={a.product.styles[0]} size={52} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={s.altName}>
+                      {a.product.width}×{a.product.depth}×{a.product.height} cm
+                    </Text>
+                    <Text style={s.caption}>{STYLE_LABEL[a.product.styles[0]]} look</Text>
+                    <Text style={[s.caption, { color: a.ok ? colors.success : colors.error }]} numberOfLines={2}>
+                      {a.ok ? "Fits — all checks pass" : a.reason}
+                    </Text>
+                  </View>
+                  <Button small kind={a.ok ? "primary" : "secondary"} label="Use size" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
                 </View>
-                <Button small kind={a.ok ? "primary" : "secondary"} label="Use size" onPress={() => doSwap(a.product.id)} testID={`swap-btn-${a.product.id}`} />
-              </View>
-            ))}
+              ))}
           </ScrollView>
         ) : null}
       </View>
