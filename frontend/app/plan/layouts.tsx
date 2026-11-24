@@ -124,19 +124,10 @@ export default function LayoutsStep() {
         </Card>
       ) : (
         <>
-          {missing.length || fails.length ? (
-            <Card style={s.issueCard} testID="layout-issues">
-              <Notice
-                tone="warning"
-                text={[
-                  missing.length ? `Not enough room for: ${missing.join(", ")}. ${missing.length > 1 ? "They were" : "It was"} left out of this plan.` : null,
-                  ...fails.map(c => c.detail),
-                  "You can still adjust the pieces and continue, or change your furniture.",
-                ].filter(Boolean).join(" ")}
-                testID="layout-issues-text"
-              />
-              <Button label="Edit furniture" kind="secondary" small onPress={() => router.push("/plan/furniture")} testID="layout-issues-edit-furniture" />
-            </Card>
+          {missing.length ? (
+            <Text style={s.intro} testID="layout-left-out">
+              To keep everything fitting, this plan leaves out: {missing.join(", ")}. You can change your furniture anytime.
+            </Text>
           ) : null}
           <Text style={s.intro}>Drag a piece to move it. Tap furniture, then use Rotate 90° to turn it.</Text>
           <Card style={s.layoutCard} testID="layout-card-0">
@@ -175,7 +166,6 @@ const useStyles = makeStyles(c => ({
   caption: { fontFamily: fonts.text, fontSize: 14, color: c.muted },
   intro: { fontFamily: fonts.text, fontSize: 15, lineHeight: 22, color: c.onSurface },
   layoutCard: { padding: spacing.sm },
-  issueCard: { gap: spacing.sm },
   selectedCard: { padding: spacing.md },
   selectedRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm },
   selectedName: { flex: 1, fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface },
