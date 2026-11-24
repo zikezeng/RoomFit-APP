@@ -171,6 +171,10 @@ export interface Layout {
   checks: Check[];
   problems: string[];
   suggestions: string[];
+  /** Notes that do not block the layout (e.g. demo prices above the budget; real prices are set in Step 8). */
+  warnings?: string[];
+  /** Furniture types that could not be placed safely and were left out of this layout. */
+  missing?: string[];
 }
 
 export interface Need {

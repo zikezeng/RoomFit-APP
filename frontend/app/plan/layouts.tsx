@@ -6,7 +6,7 @@ import { ConfiguredPlan } from "@/src/components/ConfiguredPlan";
 import { Button, Card, Notice } from "@/src/components/ui";
 import { WizardScaffold } from "@/src/components/WizardScaffold";
 import { getProduct } from "@/src/lib/catalog";
-import { validateLayout } from "@/src/lib/solver";
+import { spatialFails, validateLayout } from "@/src/lib/solver";
 import { Facing, PlacedItem } from "@/src/lib/types";
 import { usePlan } from "@/src/state/plan-store";
 import { fonts, makeStyles, spacing, useTheme } from "@/src/theme";
@@ -30,26 +30,38 @@ export default function LayoutsStep() {
     return () => clearTimeout(timer);
   }, [pathname, state.layouts, geom, state.seed, generate]);
 
-  // Show just one best valid option instead of three competing layout cards.
+  // Show one layout: the first fully valid one, or else the closest one the solver found
+  // (generateLayouts puts it first). The user always gets a plan to work with.
   const chosen = useMemo(() => state.layouts?.find(l => l.valid) ?? state.layouts?.[0],
     [state.layouts]);
+  const hasPlan = !!chosen && chosen.items.length > 0;
 
   useEffect(() => {
-    if (pathname !== "/plan/layouts" || !chosen?.valid || !state.layouts) return;
+    if (pathname !== "/plan/layouts" || !hasPlan || !chosen || !state.layouts) return;
     if (state.selectedLayoutId !== chosen.id) selectLayout(chosen.id);
-  }, [pathname, chosen?.id, chosen?.valid, state.layouts, state.selectedLayoutId, selectLayout]);
+  }, [pathname, hasPlan, chosen, state.layouts, state.selectedLayoutId, selectLayout]);
 
   const plan = state.plan ?? chosen?.items ?? [];
-  const validation = geom && chosen?.valid ? validateLayout(geom, plan, state.budget) : null;
+  // Room rules only: the budget check uses demo placeholder prices, real prices are chosen in Step 8.
+  const fails = geom && hasPlan ? spatialFails(validateLayout(geom, plan, state.budget).checks) : [];
+  const missing = chosen?.missing ?? [];
   const selected = plan.find(item => item.uid === selectedUid);
 
+  /** An edit is allowed if it keeps every room rule that the current plan already meets. */
+  const firstNewProblem = (candidate: PlacedItem[]) => {
+    if (!geom) return "This placement is not allowed.";
+    const before = new Set(fails.map(c => c.id));
+    const broken = spatialFails(validateLayout(geom, candidate, state.budget).checks).find(c => !before.has(c.id));
+    return broken ? broken.detail : null;
+  };
+
   const commitPosition = (uid: string, cx: number, cy: number) => {
-    if (!geom || !chosen?.valid || !state.plan) return;
+    if (!geom || !hasPlan || !state.plan) return;
     const candidate: PlacedItem[] = state.plan.map(item =>
       item.uid === uid ? { ...item, cx, cy, wall: null } : item);
-    const checked = validateLayout(geom, candidate, state.budget);
-    if (!checked.valid) {
-      setFeedback(checked.checks.find(c => !c.ok)?.detail ?? "This placement is not allowed.");
+    const problem = firstNewProblem(candidate);
+    if (problem) {
+      setFeedback(problem);
       return;
     }
     update({ plan: candidate });
@@ -69,7 +81,7 @@ export default function LayoutsStep() {
           item.uid === selected.uid
             ? { ...item, cx: item.cx + vx * radius, cy: item.cy + vy * radius, facing: face, wall: null }
             : item);
-        if (validateLayout(geom, candidate, state.budget).valid) {
+        if (!firstNewProblem(candidate)) {
           update({ plan: candidate });
           setFeedback(null);
           return;
@@ -79,7 +91,7 @@ export default function LayoutsStep() {
     setFeedback("Not enough clear space to rotate this furniture. Try moving it farther from the wall first.");
   };
   const restore = () => {
-    if (!chosen?.valid) return;
+    if (!hasPlan || !chosen) return;
     selectLayout(chosen.id);
     setSelectedUid(null);
     setFeedback(null);
@@ -93,7 +105,7 @@ export default function LayoutsStep() {
       cta={{
         label: "Continue",
         icon: "arrow-right",
-        disabled: !chosen?.valid || !state.plan || !validation?.valid,
+        disabled: !hasPlan || !state.plan,
         onPress: () => router.push("/plan/shop"),
         testID: "layouts-continue-button",
       }}
@@ -105,13 +117,27 @@ export default function LayoutsStep() {
           <ActivityIndicator color={colors.brandPrimary} />
           <Text style={s.caption}>Arranging your furniture…</Text>
         </Card>
-      ) : !chosen?.valid ? (
+      ) : !hasPlan ? (
         <Card testID="no-valid-layouts">
-          <Notice tone="warning" text="The selected items do not fit safely. Try fewer or smaller items." />
+          <Notice tone="warning" text={chosen?.problems[0] ?? "None of the selected items fit in this room. Try fewer or smaller items."} />
           <Button label="Edit furniture" kind="secondary" onPress={() => router.push("/plan/furniture")} testID="no-valid-layouts-edit-furniture" />
         </Card>
       ) : (
         <>
+          {missing.length || fails.length ? (
+            <Card style={s.issueCard} testID="layout-issues">
+              <Notice
+                tone="warning"
+                text={[
+                  missing.length ? `Not enough room for: ${missing.join(", ")}. ${missing.length > 1 ? "They were" : "It was"} left out of this plan.` : null,
+                  ...fails.map(c => c.detail),
+                  "You can still adjust the pieces and continue, or change your furniture.",
+                ].filter(Boolean).join(" ")}
+                testID="layout-issues-text"
+              />
+              <Button label="Edit furniture" kind="secondary" small onPress={() => router.push("/plan/furniture")} testID="layout-issues-edit-furniture" />
+            </Card>
+          ) : null}
           <Text style={s.intro}>Drag a piece to move it. Tap furniture, then use Rotate 90° to turn it.</Text>
           <Card style={s.layoutCard} testID="layout-card-0">
             <ConfiguredPlan
@@ -149,6 +175,7 @@ const useStyles = makeStyles(c => ({
   caption: { fontFamily: fonts.text, fontSize: 14, color: c.muted },
   intro: { fontFamily: fonts.text, fontSize: 15, lineHeight: 22, color: c.onSurface },
   layoutCard: { padding: spacing.sm },
+  issueCard: { gap: spacing.sm },
   selectedCard: { padding: spacing.md },
   selectedRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm },
   selectedName: { flex: 1, fontFamily: fonts.text, fontSize: 15, fontWeight: "600", color: c.onSurface },
