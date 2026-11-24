@@ -181,10 +181,6 @@ function ApartmentBudget() {
           onCommit={value => saveCategory(cat.id, value)}
         />;
       })}
-      <View style={s.summaryRow}>
-        <Text style={s.summaryLabel}>Planned for {roomName}</Text>
-        <Text style={s.summaryValue}>{money(active?.planned ?? 0)}</Text>
-      </View>
       {summary.length > 1 ? (
         <Card style={{ gap: spacing.sm }}>
           <Text style={s.name}>All selected rooms</Text>
