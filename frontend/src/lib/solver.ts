@@ -327,11 +327,8 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
   }
   const problems: string[] = [];
   const suggestions: string[] = [];
-  if (total() > budget) {
-    const min = units.reduce((s, u) => s + Math.min(...u.cands.map((p) => p.price)), 0);
-    problems.push(`Even the cheapest matching pieces cost $${min.toLocaleString()}, above your $${budget.toLocaleString()} budget.`);
-    suggestions.push(`Raise the budget to at least $${min.toLocaleString()} or remove optional items.`);
-  }
+  const warnings: string[] = [];
+  const missing: string[] = [];
   const placed: Placed[] = [];
   let S = sortedWalls[st.rank % sortedWalls.length];
   const isH = () => S.axis === "h";
@@ -470,10 +467,13 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
 
   for (const u of units) {
     let it: PlacedItem | null = null;
-    const tried = [u.pick, ...u.cands.map((_, i) => i).filter((i) => i !== u.pick)];
+    // Layout prices are demo placeholders (real prices are chosen in Step 8), so the budget only orders the
+    // options: alternatives within budget are tried first, then any other size that fits the room.
+    const others = u.cands.map((_, i) => i).filter((i) => i !== u.pick);
+    const inBudget = (i: number) => total() - u.cands[u.pick].price + u.cands[i].price <= budget;
+    const tried = [u.pick, ...others.filter(inBudget), ...others.filter((i) => !inBudget(i))];
     for (const i of tried) {
       const p = u.cands[i];
-      if (i !== u.pick && total() - u.cands[u.pick].price + p.price > budget) continue;
       it = placeOne(u, p);
       if (it) {
         u.pick = i;
@@ -486,20 +486,56 @@ function solveStrategy(st: Strategy, input: GenInput, variant: number, id: strin
     }
     else {
       const name = u.cat === "custom" ? u.cands[0].name : CATEGORY_MAP[u.cat].label.toLowerCase();
-      problems.push(`No ${name} option could be placed inside the ${g.label} without crossing walls, overlapping, or blocking doors/windows.`);
+      problems.push(`No safe spot for the ${name}, so it was left out of this layout.`);
       suggestions.push(`Remove the ${name} or choose fewer pieces for this room.`);
+      missing.push(name);
     }
   }
   const items = placed.map((o) => o.item);
   const v = validateLayout(g, items, budget);
-  if (!problems.length && !v.valid) {
-    v.checks.filter((c) => !c.ok).forEach((c) => problems.push(c.detail));
-    suggestions.push("Remove an optional piece or choose smaller furniture.");
-  }
-  return { id, name: `Layout ${letter} — ${st.name}`, tagline: st.tagline, valid: !problems.length && v.valid, items, total: v.total, checks: v.checks, problems, suggestions };
+  // Room rules decide validity; the budget check uses demo prices and is only a note here.
+  const roomFails = spatialFails(v.checks);
+  roomFails.forEach((c) => problems.push(c.detail));
+  if (roomFails.length) suggestions.push("Move or rotate the highlighted pieces, or remove an optional piece.");
+  if (v.total > budget) warnings.push("Placeholder prices for this layout add up to more than the room budget; real prices are chosen in Step 8.");
+  return { id, name: `Layout ${letter} — ${st.name}`, tagline: st.tagline, valid: !problems.length, items, total: v.total, checks: v.checks, problems, suggestions, warnings, missing };
 }
 
+/** Failed checks about the room itself (walls, overlaps, doors, walkways, windows) — everything except budget. */
+export const spatialFails = (checks: Check[]) => checks.filter((c) => !c.ok && c.id !== "budget");
+
+/** Lower is better: pieces left out weigh most, then broken room rules; more pieces placed breaks ties. */
+const layoutCost = (l: Layout) => (l.missing?.length ?? 0) * 100 + spatialFails(l.checks).length * 10 - l.items.length * 0.01;
+
+/**
+ * Always returns at least one layout to show. The first three strategies are tried as before; if none of
+ * them produces a fully valid layout, every strategy and several product variants are searched before
+ * giving up. If nothing is fully valid, the closest layout comes first (valid: false) and lists what is
+ * left out or which rule it breaks, so the user still gets a plan to adjust.
+ */
 export function generateLayouts(input: GenInput): Layout[] {
+  const first3 = generateLayoutsCore(input);
+  if (first3.some((l) => l.valid)) return first3;
+  const k = input.geom.kind;
+  const pool = POOLS[k === "bedroom" ? "bedroom" : k === "living" ? "living" : "other"];
+  const seen: Layout[] = [...first3];
+  for (let v = 0; v < 4; v++) {
+    for (let i = 0; i < pool.length; i++) {
+      const st = pool[i];
+      const flip = st.armSide === 1 ? -1 : 1;
+      const tries: Strategy[] = [st, { ...st, armSide: flip }, { ...st, pref: "compact" }, { ...st, pref: "compact", armSide: flip }, { ...st, rank: st.rank + 1 }, { ...st, rank: st.rank + 2, pref: "compact" }, { ...st, rank: st.rank + 3 }];
+      for (const t of tries) {
+        const l = solveStrategy(t, input, Math.floor(input.seed / 2) + v, `x${input.seed}-${v}-${i}`, "A");
+        if (l.valid) return [l, ...first3];
+        seen.push(l);
+      }
+    }
+  }
+  const best = [...seen].filter((l) => l.items.length).sort((a, b) => layoutCost(a) - layoutCost(b))[0];
+  return best ? [best, ...first3.filter((l) => l !== best)] : first3;
+}
+
+function generateLayoutsCore(input: GenInput): Layout[] {
   const k = input.geom.kind;
   const pool = POOLS[k === "bedroom" ? "bedroom" : k === "living" ? "living" : "other"];
   const start = (input.seed * 3) % pool.length;
