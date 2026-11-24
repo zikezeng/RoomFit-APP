@@ -140,10 +140,7 @@ export const initialState = (): PlanState => ({
 /** Mia's demo — only loaded when the user explicitly taps "Try a Demo". */
 export const demoState = (): PlanState => {
   const needs = defaultNeeds("living");
-  needs.armchair = { qty: 1, priority: "essential" };
-  needs.side_table = { qty: 1, priority: "optional" };
   needs.floor_lamp = { qty: 1, priority: "essential" };
-  needs.rug = { qty: 1, priority: "optional" };
   return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", selectedRoomIds: ["r-liv"], roomBudgetOverrides: { "r-liv": 2500 }, needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
 };
 
