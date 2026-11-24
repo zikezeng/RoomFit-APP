@@ -226,9 +226,6 @@ function ApartmentBudget() {
             Within budget. Allow for unexpected costs.
           </Text>
         )}
-        <Text style={s.k}>
-          Spending reflects furniture amounts entered in Step 6, not confirmed purchases.
-        </Text>
       </Card>
     </WizardScaffold>
   );
