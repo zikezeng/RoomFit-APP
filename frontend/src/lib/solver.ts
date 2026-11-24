@@ -532,7 +532,41 @@ export function generateLayouts(input: GenInput): Layout[] {
     }
   }
   const best = [...seen].filter((l) => l.items.length).sort((a, b) => layoutCost(a) - layoutCost(b))[0];
-  return best ? [best, ...first3.filter((l) => l !== best)] : first3;
+  if (!best) return first3;
+  const fitted = pruneToFit(best, input);
+  return [fitted, ...first3.filter((l) => l !== best)];
+}
+
+/** Main pieces a room is planned around; they are left out last. */
+const ANCHORS = new Set<CategoryId>(["sofa", "bed_frame", "mattress", "dining_table", "desk"]);
+
+/**
+ * The auto-generated plan must always fit. Take the closest layout and leave out pieces until every room
+ * rule passes: optional before essential, small extras before main pieces. Then put back any left-out
+ * piece that still fits where the solver had placed it.
+ */
+function pruneToFit(l: Layout, input: GenInput): Layout {
+  const g = input.geom;
+  const fails = (its: PlacedItem[]) => spatialFails(validateLayout(g, its, input.budget).checks).length;
+  const tier = (it: PlacedItem) => (input.needs[it.category]?.priority === "essential" ? 2 : 0) + (ANCHORS.has(it.category) ? 1 : 0);
+  const area = (it: PlacedItem) => { const p = getProduct(it.productId); return p.width * p.depth; };
+  let items = l.items;
+  const removed: PlacedItem[] = [];
+  while (items.length && fails(items) > 0) {
+    const low = Math.min(...items.map(tier));
+    const drop = items.filter((it) => tier(it) === low)
+      .map((it) => ({ it, f: fails(items.filter((x) => x !== it)) }))
+      .sort((a, b) => a.f - b.f || area(b.it) - area(a.it))[0].it;
+    removed.push(drop);
+    items = items.filter((x) => x !== drop);
+  }
+  for (const it of [...removed].reverse()) {
+    if (fails([...items, it]) === 0) { items = [...items, it]; removed.splice(removed.indexOf(it), 1); }
+  }
+  const nameOf = (it: PlacedItem) => (it.category === "custom" ? getProduct(it.productId).name : CATEGORY_MAP[it.category].label.toLowerCase());
+  const missing = [...new Set([...(l.missing ?? []), ...removed.map(nameOf)])];
+  const v = validateLayout(g, items, input.budget);
+  return { ...l, items, total: v.total, checks: v.checks, valid: true, problems: [], suggestions: [], warnings: [], missing };
 }
 
 function generateLayoutsCore(input: GenInput): Layout[] {
