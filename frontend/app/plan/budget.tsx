@@ -121,14 +121,14 @@ function ApartmentBudget() {
   });
   const active = summary.find(row => row.id === state.selectedRoomId);
   const roomName = active?.name ?? "Selected room";
-  const estimated = summary.reduce((sum, row) => sum + row.estimate, 0);
-  const planned = summary.reduce((sum, row) => sum + row.planned, 0);
-  const comparison = Math.max(estimated, planned);
-  const usage = state.apartmentBudget > 0 ? comparison / state.apartmentBudget : 0;
+  const plannedCost = state.apartmentBudget; // Step 3: sum of user-entered room budgets
+  const planned = summary.reduce((sum, row) => sum + row.planned, 0); // Step 6: furniture-category spending
+  const comparison = planned;
+  const usage = plannedCost > 0 ? comparison / plannedCost : 0;
   const over = usage > 1;
   const near = !over && usage >= WARNING_THRESHOLD;
   const accent = over ? colors.error : near ? colors.warning : colors.success;
-  const remaining = state.apartmentBudget - comparison;
+  const remaining = plannedCost - comparison;
 
   const saveCategory = (id: CategoryId, dollars: number) => {
     if (!active) return;
@@ -181,10 +181,6 @@ function ApartmentBudget() {
           onCommit={value => saveCategory(cat.id, value)}
         />;
       })}
-      <View style={s.summaryRow}>
-        <Text style={s.summaryLabel}>Planned for {roomName}</Text>
-        <Text style={s.summaryValue}>{money(active?.planned ?? 0)}</Text>
-      </View>
       {summary.length > 1 ? (
         <Card style={{ gap: spacing.sm }}>
           <Text style={s.name}>All selected rooms</Text>
@@ -197,14 +193,14 @@ function ApartmentBudget() {
         </Card>
       ) : null}
       <Card style={[s.estimateCard, near && s.warnCard, over && s.overCard]} testID="budget-estimate-card">
-        <Text style={s.h}>Estimated furniture cost</Text>
-        <Text style={s.k}>All selected rooms · typical catalog prices</Text>
+        <Text style={s.h}>Furniture cost summary</Text>
+        <Text style={s.k}>All selected rooms · budget vs. furniture spending</Text>
         <View style={s.between}>
-          <Text style={s.k}>Estimated cost</Text>
-          <Text style={s.bigValue} testID="budget-estimate">{money(estimated)}</Text>
+          <Text style={s.k}>Planned cost</Text>
+          <Text style={s.bigValue} testID="budget-estimate">{money(plannedCost)}</Text>
         </View>
         <View style={s.between}>
-          <Text style={s.k}>Furniture spending targets</Text>
+          <Text style={s.k}>Actual spending</Text>
           <Text style={s.summaryValue} testID="budget-planned">{money(planned)}</Text>
         </View>
         <View style={s.between}>
@@ -219,7 +215,7 @@ function ApartmentBudget() {
         </View>
         {over ? (
           <Text style={[s.status, { color: colors.error }]}>
-            Over budget. Reduce furniture targets or increase the total budget.
+            Over budget. Reduce furniture spending or increase room budgets in Step 3.
           </Text>
         ) : near ? (
           <Text style={[s.status, { color: colors.warning }]}>
@@ -230,10 +226,6 @@ function ApartmentBudget() {
             Within budget. Allow for unexpected costs.
           </Text>
         )}
-        <Text style={s.k}>
-          The warning uses the higher of catalog estimates and spending targets.
-          Actual purchases may differ.
-        </Text>
       </Card>
     </WizardScaffold>
   );

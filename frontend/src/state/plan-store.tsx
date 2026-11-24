@@ -59,7 +59,14 @@ export function toggleRoom(s: PlanState, id: string): PlanState {
   if (!room || !FURNISHABLE.includes(room.kind)) return s;
   const ids = new Set(s.selectedRoomIds);
   if (ids.has(id)) ids.delete(id); else ids.add(id);
-  return { ...saveRoom(s), selectedRoomIds: [...s.apartment.rooms].sort((a,b) => roomRank(a.kind) - roomRank(b.kind)).filter(r => ids.has(r.id)).map(r => r.id) };
+  const selectedRoomIds = [...s.apartment.rooms].sort((a,b) => roomRank(a.kind) - roomRank(b.kind)).filter(r => ids.has(r.id)).map(r => r.id);
+  // Step 3 is room-first: each added room starts with $0 until the user
+  // enters a budget. Removing a room removes its allocation from the total.
+  const roomBudgetOverrides = Object.fromEntries(selectedRoomIds.map(roomId => [
+    roomId, s.roomBudgetOverrides?.[roomId] ?? 0,
+  ])) as Record<string, number>;
+  const apartmentBudget = Object.values(roomBudgetOverrides).reduce((sum, value) => sum + value, 0);
+  return rebalanceRoomBudgets({ ...saveRoom(s), selectedRoomIds, roomBudgetOverrides, apartmentBudget });
 }
 
 /** Navigation saves the current room before activating its neighbour. */
@@ -137,7 +144,7 @@ export const demoState = (): PlanState => {
   needs.side_table = { qty: 1, priority: "optional" };
   needs.floor_lamp = { qty: 1, priority: "essential" };
   needs.rug = { qty: 1, priority: "optional" };
-  return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", selectedRoomIds: ["r-liv"], needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
+  return { ...initialState(), apartment: sampleApartment(), room: SAMPLE_ROOM, dimsConfirmed: true, roomKind: "living", selectedRoomId: "r-liv", selectedRoomIds: ["r-liv"], roomBudgetOverrides: { "r-liv": 2500 }, needsKind: "living", needs, styles: ["japandi"], moods: ["warm"] };
 };
 
 // Existing budget and product-detail components read the current room through these helpers.
@@ -209,6 +216,9 @@ export function restoreState(saved: Partial<PlanState> & { roomConfigs?: Record<
   }
   s.categoryBudgets = s.categoryBudgets ?? {};
   s.roomBudgetOverrides = saved.roomBudgetOverrides ?? null;
+  if (s.roomBudgetOverrides) {
+    s.apartmentBudget = s.selectedRoomIds.reduce((sum, id) => sum + Math.max(0, s.roomBudgetOverrides?.[id] ?? 0), 0);
+  }
   for (const [id, config] of Object.entries(saved.roomConfigs ?? {})) {
     if (!s.roomProgress[id]) s.roomProgress[id] = { ...config, categoryBudgets: config.categoryBudgets ?? {}, roomKind: config.needsKind, layouts: null, seed: 0, selectedLayoutId: null, plan: null, realSelections: {} };
   }
@@ -332,39 +342,39 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const setRoomBudgets = useCallback((changes: Record<string, number>) => {
     setState(s => {
-      // Freeze the current automatic split on the first manual adjustment.
-      const automatic = rebalanceRoomBudgets({ ...s, roomBudgetOverrides: null });
-      const current = Object.fromEntries(s.selectedRoomIds.map(id =>
-        [id, s.roomBudgetOverrides?.[id] ?? automatic.roomProgress[id]?.budget ?? 0]));
+      const ids = s.selectedRoomIds;
+      const allocations = Object.fromEntries(ids.map(id => [
+        id, s.roomBudgetOverrides?.[id] ?? s.roomProgress[id]?.budget ?? (ids.length === 1 ? s.budget : 0),
+      ])) as Record<string, number>;
       for (const [id, amount] of Object.entries(changes)) {
-        if (!s.selectedRoomIds.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
-        current[id] = Math.round(amount);
+        if (!ids.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
+        allocations[id] = Math.round(amount);
       }
-      const total = Object.values(current).reduce((sum, amount) => sum + amount, 0);
-      if (total > s.apartmentBudget) return s;
-      return rebalanceRoomBudgets({ ...s, roomBudgetOverrides: current, realSelections: {} });
+      const total = Object.values(allocations).reduce((sum, value) => sum + value, 0);
+      if (total > 150000) return s;
+      return rebalanceRoomBudgets({
+        ...s, apartmentBudget: total, roomBudgetOverrides: allocations, realSelections: {},
+      });
     });
   }, [setState]);
 
   // Save total and room allocations together, avoiding stale-budget navigation.
-  const setBudgetPlan = useCallback((total: number, changes: Record<string, number>) => {
+  const setBudgetPlan = useCallback((_total: number, changes: Record<string, number>) => {
+    // Legacy action remains available for other screens; the apartment total is
+    // now always derived from the selected room budgets, not entered separately.
     setState(s => {
-      if (!Number.isFinite(total) || total < 300 || total > 150000) return s;
-      const automatic = rebalanceRoomBudgets({ ...s, roomBudgetOverrides: null });
-      const manual = s.roomBudgetOverrides == null && !Object.keys(changes).length
-        ? null
-        : Object.fromEntries(s.selectedRoomIds.map(id => [
-          id, s.roomBudgetOverrides?.[id] ?? automatic.roomProgress[id]?.budget ?? 0,
-        ])) as Record<string, number>;
-      if (manual) {
-        for (const [id, amount] of Object.entries(changes)) {
-          if (!s.selectedRoomIds.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
-          manual[id] = Math.round(amount);
-        }
-        if (Object.values(manual).reduce((sum, n) => sum + n, 0) > total) return s;
+      const ids = s.selectedRoomIds;
+      const allocations = Object.fromEntries(ids.map(id => [
+        id, s.roomBudgetOverrides?.[id] ?? s.roomProgress[id]?.budget ?? 0,
+      ])) as Record<string, number>;
+      for (const [id, amount] of Object.entries(changes)) {
+        if (!ids.includes(id) || !Number.isFinite(amount) || amount < 0) return s;
+        allocations[id] = Math.round(amount);
       }
+      const total = Object.values(allocations).reduce((sum, amount) => sum + amount, 0);
+      if (total > 150000) return s;
       return rebalanceRoomBudgets({
-        ...s, apartmentBudget: Math.round(total), roomBudgetOverrides: manual, realSelections: {},
+        ...s, apartmentBudget: total, roomBudgetOverrides: allocations, realSelections: {},
       });
     });
   }, [setState]);
