@@ -197,14 +197,14 @@ function ApartmentBudget() {
         </Card>
       ) : null}
       <Card style={[s.estimateCard, near && s.warnCard, over && s.overCard]} testID="budget-estimate-card">
-        <Text style={s.h}>Estimated furniture cost</Text>
+        <Text style={s.h}>Furniture cost summary</Text>
         <Text style={s.k}>All selected rooms · typical catalog prices</Text>
         <View style={s.between}>
-          <Text style={s.k}>Estimated cost</Text>
+          <Text style={s.k}>Planned cost</Text>
           <Text style={s.bigValue} testID="budget-estimate">{money(estimated)}</Text>
         </View>
         <View style={s.between}>
-          <Text style={s.k}>Furniture spending targets</Text>
+          <Text style={s.k}>Actual spending</Text>
           <Text style={s.summaryValue} testID="budget-planned">{money(planned)}</Text>
         </View>
         <View style={s.between}>
